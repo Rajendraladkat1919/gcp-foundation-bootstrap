@@ -1,0 +1,89 @@
+name: tf-apply
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions: {}
+
+# One apply at a time, never cancelled half way through.
+concurrency:
+  group: tf-apply
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: "1.16.6"
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+
+jobs:
+  stages:
+    name: stages
+    runs-on: ${{ fromJSON(vars.RUNNER_LABELS || '["ubuntu-24.04"]') }}
+    permissions:
+      contents: read
+    outputs:
+      list: ${{ steps.set.outputs.list }}
+      any: ${{ steps.set.outputs.any }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: set
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          base=""
+          # A manual run applies every stage. A push applies the stages it touched.
+          if [ "$EVENT" = "push" ] && [ -n "$BEFORE_SHA" ] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            base="$BEFORE_SHA"
+          fi
+          list="$(scripts/changed-stages.sh "$base")"
+          echo "list=${list}" >> "$GITHUB_OUTPUT"
+          echo "any=$([ "$list" = "[]" ] && echo false || echo true)" >> "$GITHUB_OUTPUT"
+
+  apply:
+    name: apply
+    needs: stages
+    if: needs.stages.outputs.any == 'true'
+    runs-on: ${{ fromJSON(vars.RUNNER_LABELS || '["ubuntu-24.04"]') }}
+    # Required reviewers on this environment are the human approval gate.
+    environment: production
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Authenticate and install Terraform once. The loop below re-inits per stage.
+      - uses: ./.github/actions/terraform-init
+        with:
+          stage: ${{ fromJSON(needs.stages.outputs.list)[0] }}
+          service-account: ${{ vars.TF_APPLY_SA }}
+          workload-identity-provider: ${{ vars.WIF_PROVIDER }}
+          state-bucket: ${{ vars.TF_STATE_BUCKET }}
+          modules-token: ${{ secrets.MODULES_READ_TOKEN }}
+          terraform-version: ${{ env.TF_VERSION }}
+
+      - name: terraform apply, stage by stage
+        env:
+          STAGES: ${{ needs.stages.outputs.list }}
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: |
+          set -euo pipefail
+          for stage in $(jq -r '.[]' <<<"$STAGES"); do
+            echo "::group::${stage}"
+            pushd "$stage" >/dev/null
+            terraform init -input=false -reconfigure -backend-config="bucket=${STATE_BUCKET}"
+            terraform validate
+            terraform plan -input=false -lock-timeout=10m -no-color -out=tfplan
+            terraform apply -input=false -lock-timeout=10m -no-color tfplan
+            popd >/dev/null
+            echo "::endgroup::"
+          done

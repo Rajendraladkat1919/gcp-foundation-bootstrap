@@ -1,0 +1,7 @@
+---
+# Key upload, automatic default-service-account grants, and domain restricted
+# sharing stay on the Google organization security baseline. This stage does not set them.
+
+iam.disableServiceAccountKeyCreation:
+  rules:
+    - enforce: true

@@ -1,0 +1,23 @@
+name: Change request
+description: Ask the platform team for a change to the foundation.
+labels: ["change-request"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What do you need?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why, and what happens if it is not done?
+    validations:
+      required: true
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Does it touch identity, org policy or billing?
+      options: ["No", "Yes"]
+    validations:
+      required: true

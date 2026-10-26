@@ -1,0 +1,6 @@
+# Ordered list of Terraform stages. Applied top to bottom, one directory each.
+# Workflows read this file, so adding a stage never requires a workflow edit.
+0-core-projects
+1-org
+2-cicd-identity
+3-workload-projects

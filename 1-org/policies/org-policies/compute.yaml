@@ -1,0 +1,37 @@
+---
+# Compute organization policies. Protocol forwarding and external IP rules are list policies.
+
+compute.disableGuestAttributesAccess:
+  rules:
+    - enforce: true
+
+compute.disableSerialPortAccess:
+  rules:
+    - enforce: true
+
+compute.requireOsLogin:
+  rules:
+    - enforce: true
+
+compute.requireShieldedVm:
+  rules:
+    - enforce: true
+
+compute.restrictProtocolForwardingCreationForTypes:
+  rules:
+    - allow:
+        values:
+          - INTERNAL
+
+compute.restrictXpnProjectLienRemoval:
+  rules:
+    - enforce: true
+
+compute.skipDefaultNetworkCreation:
+  rules:
+    - enforce: true
+
+compute.vmExternalIpAccess:
+  rules:
+    - deny:
+        all: true

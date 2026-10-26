@@ -1,0 +1,14 @@
+framework:
+  - terraform
+  - github_actions
+  - secrets
+quiet: true
+compact: true
+download-external-modules: false
+skip-path:
+  - ".terraform/"
+# Every skip needs a written justification, see docs/controls.md ("Exceptions").
+skip-check:
+  # EX-5 in docs/controls.md: modules come from one internal repository, pinned by
+  # release tag. Protect the v* tags in gcp-terraform-module with a tag ruleset.
+  - CKV_TF_1

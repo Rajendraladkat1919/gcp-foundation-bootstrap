@@ -1,0 +1,11 @@
+title = "gcp-foundation-bootstrap gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Placeholders that are not secrets"
+regexes = [
+  '''REPLACE_ME''',
+  '''000000000000''',
+]

@@ -1,0 +1,6 @@
+---
+essentialcontacts.allowedContactDomains:
+  rules:
+    - allow:
+        values:
+          - "@${organization.domain}"

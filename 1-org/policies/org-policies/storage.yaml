@@ -1,0 +1,10 @@
+---
+# storage.uniformBucketLevelAccess stays on the Google organization security baseline.
+
+storage.publicAccessPrevention:
+  rules:
+    - enforce: true
+
+storage.secureHttpTransport:
+  rules:
+    - enforce: true
