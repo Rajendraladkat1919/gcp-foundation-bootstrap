@@ -1,0 +1,11 @@
+# One file per workload project. Merge a new file to get a project, a grant of
+# dev-terraform-execute on that project, and a state bucket.
+business_unit: business-unit-1
+environment: nonprod         # prod | nonprod
+short_name: bu-1             # project id = <prefix>-<env code>-<environment>-<short_name>
+repository: gcp-wlp-nonprod-bu-1
+cost_center: platform
+# Human access. Principals must be groups, never individual users.
+iam_groups:
+  "group:business-unit-1@example.com":
+    - roles/viewer

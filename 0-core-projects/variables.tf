@@ -55,3 +55,21 @@ variable "region" {
   description = "Region for state buckets, the KMS key ring and the access log bucket. Must be allowed by the location org policy."
   type        = string
 }
+
+variable "enable_prisma_cloud" {
+  description = "Create the sa-prisma-cloud service account with org-level read-only access for Prisma Cloud CSPM connector. The SA email is emitted as an output to configure in the Prisma Cloud console."
+  type        = bool
+  default     = false
+}
+
+variable "enable_scc" {
+  description = "Enable Security Command Center resources. Requires SCC Premium or Enterprise tier to be activated manually in the Google Cloud console before applying."
+  type        = bool
+  default     = false
+}
+
+variable "security_contact_email" {
+  description = "Email address (or Google Group) for security notifications: essential contacts, monitoring alerts, and SCC findings. Must belong to the organization domain."
+  type        = string
+  default     = ""
+}

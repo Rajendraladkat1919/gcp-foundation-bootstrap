@@ -1,7 +1,22 @@
 ---
-# Key upload, automatic default-service-account grants, and domain restricted
-# sharing stay on the Google organization security baseline. This stage does not set them.
+# IAM organization policies.
 
 iam.disableServiceAccountKeyCreation:
+  rules:
+    - enforce: true
+
+# Prevent uploading externally-generated SA keys (only GCP-managed keys allowed).
+iam.disableServiceAccountKeyUpload:
+  rules:
+    - enforce: true
+
+# Prevent automatic Editor/Owner grants to the Compute and App Engine default SAs.
+iam.automaticIamGrantsForDefaultServiceAccounts:
+  rules:
+    - enforce: true
+
+# Prevent GKE Workload Identity pools from being created outside of OIDC federation
+# so on-prem workloads must use the approved OIDC path (Okta → WIF).
+iam.disableWorkloadIdentityClusterCreation:
   rules:
     - enforce: true

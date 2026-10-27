@@ -4,28 +4,20 @@ output "access_log_bucket" {
 }
 
 output "automation_service_accounts" {
-  description = "Email of the Terraform executor. The GitHub variable TF_SA uses the execute key. sa-billing-reader and sa-logging-reader are not included."
+  description = "Email of the Terraform executor. The GitHub variable TF_SA uses the execute key."
   value = {
     execute = module.sa_terraform.email
   }
 }
 
 output "core_project_numbers" {
-  description = "Project number of each core project."
-  value = {
-    iac_core = module.iac_core.number
-    billing  = module.billing.number
-    logging  = module.logging.number
-  }
+  description = "Project number of each core project, keyed by iac_core / billing / logging."
+  value       = { for k, v in module.core_project : k => v.number }
 }
 
 output "core_projects" {
-  description = "Project id of each core project."
-  value = {
-    iac_core = module.iac_core.project_id
-    billing  = module.billing.project_id
-    logging  = module.logging.project_id
-  }
+  description = "Project id of each core project, keyed by iac_core / billing / logging."
+  value       = { for k, v in module.core_project : k => v.project_id }
 }
 
 output "kms_state_key_id" {
@@ -34,9 +26,25 @@ output "kms_state_key_id" {
 }
 
 output "state_buckets" {
-  description = "Terraform state bucket of each repository, keyed by bootstrap and lz."
+  description = "Terraform state bucket names, keyed by bootstrap and lz."
+  value       = { for k, v in module.state : k => v.name }
+}
+
+output "billing_export_dataset" {
+  description = "BigQuery dataset for Cloud Billing export. Enable the export in the Cloud Billing console pointing to this dataset."
   value = {
-    bootstrap = module.state_bootstrap.name
-    lz        = module.state_lz.name
+    project    = module.core_project["billing"].project_id
+    dataset_id = google_bigquery_dataset.billing_export.dataset_id
+    location   = google_bigquery_dataset.billing_export.location
   }
+}
+
+output "xsiam_pubsub_topic" {
+  description = "Pub/Sub topic id that receives org-level security events for XSIAM. Stage 1 creates the log sinks that write here."
+  value       = google_pubsub_topic.xsiam.id
+}
+
+output "prisma_cloud_sa_email" {
+  description = "Prisma Cloud CSPM service account email. Register this in Prisma Cloud → Settings → Cloud Accounts. Null when enable_prisma_cloud is false."
+  value       = var.enable_prisma_cloud ? module.sa_prisma_cloud[0].email : null
 }

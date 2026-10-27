@@ -35,3 +35,13 @@ compute.vmExternalIpAccess:
   rules:
     - deny:
         all: true
+
+# Prevent nested virtualization (security hardening, reduces hypervisor attack surface).
+compute.disableNestedVirtualization:
+  rules:
+    - enforce: true
+
+# Force new projects to use zonal DNS only (avoids global DNS changes causing outages).
+compute.setNewProjectDefaultToZonalDNSOnly:
+  rules:
+    - enforce: true
