@@ -15,6 +15,9 @@ override.tf.json
 terraform.rc
 *.tfvars.local
 *.auto.tfvars.local
+# Local environment values. Commit terraform.tfvars.example only.
+terraform.tfvars
+*.auto.tfvars
 
 # Secrets, never commit
 *.pem
