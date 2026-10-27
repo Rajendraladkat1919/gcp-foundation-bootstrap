@@ -6,8 +6,9 @@
 
 - [ ] 0-core-projects
 - [ ] 1-org
-- [ ] 2-cicd-identity
-- [ ] 3-workload-projects
+- [ ] 2-network-projects
+- [ ] 3-cicd-identity
+- [ ] 4-workload-projects
 - [ ] Workflows / tooling / docs only
 
 ## Checklist

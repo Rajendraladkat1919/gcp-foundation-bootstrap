@@ -8,7 +8,7 @@ Organization policy, projects, identity and workload projects change at very dif
 
 ## Decision
 
-Four stage directories (`0-core-projects`, `1-org`, `2-cicd-identity`, `3-workload-projects`), each with its own state prefix in one CMEK-encrypted bucket. The order is in `config/stages.txt`. Stages talk to each other through outputs read with `terraform_remote_state`, and through `modules/naming` for names that must never diverge.
+Four stage directories (`0-core-projects`, `1-org`, `3-cicd-identity`, `4-workload-projects`), each with its own state prefix in one CMEK-encrypted bucket. The order is in `config/stages.txt`. Stages talk to each other through outputs read with `terraform_remote_state`, and through `modules/naming` for names that must never diverge.
 
 ## Consequences
 

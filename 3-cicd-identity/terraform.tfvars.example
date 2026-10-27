@@ -1,0 +1,17 @@
+# Copy to terraform.tfvars and fill in the real values. Do not commit terraform.tfvars.
+prefix     = "demo"
+github_org = "REPLACE_ME"
+
+# Same pool as the pipelines. This repository does not get a Terraform service account.
+additional_repositories = ["cicd-runners"]
+
+# These repositories impersonate dev-terraform-execute in the iac-core project.
+# Workload repositories are added from 4-workload-projects YAML.
+pipelines = {
+  bootstrap = {
+    repository = "gcp-foundation-bootstrap"
+  }
+  lz = {
+    repository = "gcp-infrastructure-lz"
+  }
+}

@@ -1,17 +1,17 @@
-# One file per workload project. Merge a new file to get a project, a deployer
-# identity bound to the workload repository, and a state bucket.
+# One file per workload project. Merge a new file to get a project, a grant of
+# dev-terraform-execute on that project, and a state bucket.
 business_unit: business-unit-0
 environment: prod            # prod | nonprod
 short_name: bu-0             # project id = <prefix>-<env code>-<environment>-<short_name>
 repository: gcp-wlp-prod-bu-0
-cost_center: platform-engineering
+cost_center: platform
 # APIs on top of the baseline every project gets (foundation, logging, monitoring,
 # bigquery, secret manager, storage, compute, cloudkms). The stage creates the
 # Cloud KMS key that encrypts this project's state bucket.
 # extra_apis: []
-# Extra roles for the deployer identity. The default is editor plus project IAM admin.
+# Extra roles for dev-terraform-execute on this project. The default is editor plus project IAM admin.
 # deployer_roles: []
 # Human access. Principals must be groups, never individual users.
 iam_groups:
-  "group:business-unit-commercial@platform-engineering.site":
+  "group:business-unit-0@example.com":
     - roles/viewer

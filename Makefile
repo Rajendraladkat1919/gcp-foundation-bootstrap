@@ -25,7 +25,7 @@ validate: ## Validate every stage offline against a sibling checkout of gcp-terr
 
 .PHONY: docs
 docs: ## Regenerate terraform-docs sections
-	@for s in $(STAGES) modules/naming; do terraform-docs --config .terraform-docs.yml $$s; done
+	@for s in $(STAGES); do terraform-docs --config .terraform-docs.yml $$s; done
 
 .PHONY: set-org
 set-org: ## Replace the ORG placeholder: make set-org ORG=my-github-org

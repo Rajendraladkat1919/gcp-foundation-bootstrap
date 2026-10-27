@@ -1,6 +1,6 @@
 # 0002: OIDC only, separate plan and apply identities
 
-Status: accepted
+Status: accepted. The separate plan and apply service accounts are superseded by [ADR 0006](0006-one-terraform-service-account.md). OIDC and the ban on service account keys still stand.
 
 ## Context
 

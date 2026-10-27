@@ -1,19 +1,18 @@
 module "naming" {
-  source = "../modules/naming"
+  source = "../../gcp-terraform-module/modules/naming"
   prefix = var.prefix
 }
 
 locals {
-  automation = {
-    for k, v in module.naming.automation_service_account_emails : k => "serviceAccount:${v}"
-  }
+  terraform_executor = "serviceAccount:${module.naming.automation_service_account_emails["execute"]}"
 }
 
 # ------------------------------------------------------- central audit logs
 
 module "audit_log_bucket" {
-  source      = "../../gcp-terraform-module/modules/logging-bucket"
-  parent      = module.naming.core_project_ids["logging"]
+  source = "../../gcp-terraform-module/modules/logging-bucket"
+  # Provider stores this as projects/<id>. The short id forces a new bucket.
+  parent      = "projects/${module.naming.core_project_ids["logging"]}"
   parent_type = "project"
   name        = "org-audit"
   location    = var.region
@@ -24,8 +23,9 @@ module "audit_log_bucket" {
 
 # Flow logs stay out of the audit bucket. They are high volume and have a shorter retention.
 module "network_log_bucket" {
-  source      = "../../gcp-terraform-module/modules/logging-bucket"
-  parent      = module.naming.core_project_ids["logging"]
+  source = "../../gcp-terraform-module/modules/logging-bucket"
+  # Provider stores this as projects/<id>. The short id forces a new bucket.
+  parent      = "projects/${module.naming.core_project_ids["logging"]}"
   parent_type = "project"
   name        = "org-network"
   location    = var.region
@@ -96,6 +96,34 @@ locals {
     nonprod = module.naming.environments["nonprod"].folder_name
   }
 
+  # xpnAdmin here so stage 2 can enable Shared VPC hosts in projects it creates.
+  network_folder_iam = {
+    terraform_executor_network_admin = {
+      member = local.terraform_executor
+      role   = "roles/compute.networkAdmin"
+    }
+    terraform_executor_security_admin = {
+      member = local.terraform_executor
+      role   = "roles/compute.securityAdmin"
+    }
+    terraform_executor_dns_admin = {
+      member = local.terraform_executor
+      role   = "roles/dns.admin"
+    }
+    terraform_executor_ncc_admin = {
+      member = local.terraform_executor
+      role   = "roles/networkconnectivity.admin"
+    }
+    terraform_executor_service_networking = {
+      member = local.terraform_executor
+      role   = "roles/servicenetworking.networksAdmin"
+    }
+    terraform_executor_xpn_admin = {
+      member = local.terraform_executor
+      role   = "roles/compute.xpnAdmin"
+    }
+  }
+
   business_unit_environments = {
     for pair in setproduct(keys(var.business_units), keys(module.naming.environments)) :
     "${pair[0]}/${pair[1]}" => {
@@ -110,18 +138,14 @@ module "folder_infrastructure" {
   source              = "../../gcp-terraform-module/modules/folder"
   parent              = var.organization_id
   name                = "Infrastructure"
-  deletion_protection = true
+  deletion_protection = !var.allow_destroy
   iam_bindings_additive = {
-    lz_apply_project_creator = {
-      member = local.automation["lz_apply"]
-      role   = "roles/resourcemanager.projectCreator"
-    }
-    lz_apply_shared_vpc_admin = {
-      member = local.automation["lz_apply"]
+    terraform_executor_shared_vpc_admin = {
+      member = local.terraform_executor
       role   = "roles/compute.xpnAdmin"
     }
-    lz_apply_folder_viewer = {
-      member = local.automation["lz_apply"]
+    terraform_executor_folder_viewer = {
+      member = local.terraform_executor
       role   = "roles/resourcemanager.folderViewer"
     }
   }
@@ -131,25 +155,26 @@ module "folder_workloads" {
   source              = "../../gcp-terraform-module/modules/folder"
   parent              = var.organization_id
   name                = "Workloads"
-  deletion_protection = true
+  deletion_protection = !var.allow_destroy
   iam_bindings_additive = {
-    lz_apply_shared_vpc_admin = {
-      member = local.automation["lz_apply"]
+    terraform_executor_shared_vpc_admin = {
+      member = local.terraform_executor
       role   = "roles/compute.xpnAdmin"
     }
-    lz_apply_folder_viewer = {
-      member = local.automation["lz_apply"]
+    terraform_executor_folder_viewer = {
+      member = local.terraform_executor
       role   = "roles/resourcemanager.folderViewer"
     }
   }
 }
 
 module "folder_infrastructure_children" {
-  source              = "../../gcp-terraform-module/modules/folder"
-  for_each            = local.infrastructure_children
-  parent              = module.folder_infrastructure.id
-  name                = each.value
-  deletion_protection = true
+  source                = "../../gcp-terraform-module/modules/folder"
+  for_each              = local.infrastructure_children
+  parent                = module.folder_infrastructure.id
+  name                  = each.value
+  deletion_protection   = !var.allow_destroy
+  iam_bindings_additive = each.key == "network" ? local.network_folder_iam : {}
 }
 
 module "folder_business_units" {
@@ -157,7 +182,7 @@ module "folder_business_units" {
   for_each            = var.business_units
   parent              = module.folder_workloads.id
   name                = each.value.display_name
-  deletion_protection = true
+  deletion_protection = !var.allow_destroy
   iam_bindings_additive = {
     business_unit_group_folder_viewer = {
       member = "group:${each.value.group}"
@@ -171,5 +196,5 @@ module "folder_business_unit_environments" {
   for_each            = local.business_unit_environments
   parent              = module.folder_business_units[each.value.business_unit].id
   name                = each.value.folder_name
-  deletion_protection = true
+  deletion_protection = !var.allow_destroy
 }

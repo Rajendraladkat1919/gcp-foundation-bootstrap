@@ -1,0 +1,366 @@
+name: terraform
+
+# Feature-branch pull request: fmt, tflint, validate, checkov, drift, plan.
+# Apply is a manual run from main. Destroy is not part of this workflow.
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: plan, or apply from main after the plan looks right
+        type: choice
+        required: true
+        options:
+          - plan
+          - apply
+      stage:
+        description: Stage directory, or all
+        type: string
+        default: all
+
+permissions: {}
+
+env:
+  TF_VERSION: "1.16.6"
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  CHECKOV_VERSION: "3.3.30"
+
+jobs:
+  stages:
+    name: stages
+    runs-on: ${{ fromJSON(vars.RUNNER_LABELS || '["ubuntu-24.04"]') }}
+    permissions:
+      contents: read
+    outputs:
+      list: ${{ steps.set.outputs.list }}
+      any: ${{ steps.set.outputs.any }}
+      action: ${{ steps.set.outputs.action }}
+      base: ${{ steps.set.outputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: set
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_ACTION: ${{ github.event.inputs.action }}
+          INPUT_STAGE: ${{ github.event.inputs.stage }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          REF: ${{ github.ref }}
+        run: scripts/ci-select.sh
+
+  checks:
+    name: fmt, lint, validate, checkov
+    needs: stages
+    if: needs.stages.outputs.action != 'drift'
+    runs-on: ${{ fromJSON(vars.RUNNER_LABELS || '["ubuntu-24.04"]') }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Checkout modules
+        env:
+          MODULES_TOKEN: ${{ secrets.MODULES_READ_TOKEN }}
+        run: scripts/ci-modules.sh
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - uses: terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337 # v6.3.2
+        with:
+          tflint_version: v0.60.0
+      - name: terraform fmt
+        run: terraform fmt -check -diff -recursive
+      - name: tflint
+        if: needs.stages.outputs.any == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          STAGES: ${{ needs.stages.outputs.list }}
+        run: |
+          set -euo pipefail
+          tflint --init --config=.tflint.hcl
+          for stage in $(jq -r '.[]' <<<"$STAGES"); do
+            echo "::group::tflint ${stage}"
+            tflint --chdir="$stage" --config="$GITHUB_WORKSPACE/.tflint.hcl"
+            echo "::endgroup::"
+          done
+      - name: terraform validate
+        if: needs.stages.outputs.any == 'true'
+        env:
+          STAGES: ${{ needs.stages.outputs.list }}
+        run: |
+          set -euo pipefail
+          for stage in $(jq -r '.[]' <<<"$STAGES"); do
+            echo "::group::validate ${stage}"
+            terraform -chdir="$stage" init -backend=false -input=false -no-color
+            terraform -chdir="$stage" validate -no-color
+            echo "::endgroup::"
+          done
+      - name: checkov
+        run: pipx run --spec "checkov==${CHECKOV_VERSION}" checkov -d . --config-file .checkov.yaml
+
+  drift:
+    name: drift
+    needs: [stages, checks]
+    if: >-
+      always() &&
+      needs.stages.result == 'success' &&
+      needs.stages.outputs.any == 'true' &&
+      (needs.checks.result == 'success' || needs.checks.result == 'skipped') &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ${{ fromJSON(vars.RUNNER_LABELS || '["ubuntu-24.04"]') }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Replace stage code with the base ref
+        env:
+          BASE: ${{ needs.stages.outputs.base }}
+          STAGES: ${{ needs.stages.outputs.list }}
+        run: |
+          set -euo pipefail
+          git cat-file -e "${BASE}^{commit}"
+          for stage in $(jq -r '.[]' <<<"$STAGES"); do
+            if git cat-file -e "${BASE}:${stage}" 2>/dev/null; then
+              git checkout "$BASE" -- "$stage"
+            else
+              rm -rf "$stage"
+            fi
+          done
+      - name: Checkout modules
+        env:
+          MODULES_TOKEN: ${{ secrets.MODULES_READ_TOKEN }}
+        run: scripts/ci-modules.sh
+      - id: first
+        env:
+          STAGES: ${{ needs.stages.outputs.list }}
+        run: |
+          set -euo pipefail
+          first=""
+          for stage in $(jq -r '.[]' <<<"$STAGES"); do
+            if [ -d "$stage" ]; then
+              first="$stage"
+              break
+            fi
+          done
+          echo "stage=${first}" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/terraform-init
+        if: steps.first.outputs.stage != ''
+        with:
+          stage: ${{ steps.first.outputs.stage }}
+          service-account: ${{ vars.TF_SA }}
+          workload-identity-provider: ${{ vars.WIF_PROVIDER }}
+          state-bucket: ${{ vars.TF_STATE_BUCKET }}
+          modules-token: ${{ secrets.MODULES_READ_TOKEN }}
+          terraform-version: ${{ env.TF_VERSION }}
+      - name: Plan the base ref
+        if: steps.first.outputs.stage != ''
+        env:
+          STAGES: ${{ needs.stages.outputs.list }}
+          EVENT: ${{ github.event_name }}
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          failed=0
+          for stage in $(jq -r '.[]' <<<"$STAGES"); do
+            if [ ! -d "$stage" ]; then
+              echo "Skip ${stage}: not on the base ref."
+              continue
+            fi
+            echo "::group::drift ${stage}"
+            terraform -chdir="$stage" init -input=false -reconfigure -backend-config="bucket=${STATE_BUCKET}"
+            set +e
+            terraform -chdir="$stage" plan -lock=false -detailed-exitcode -no-color 2>&1 | tee "${stage}/plan.log"
+            code="${PIPESTATUS[0]}"
+            set -e
+            echo "::endgroup::"
+            if [ "$code" = "0" ]; then
+              continue
+            fi
+            failed=1
+            echo "::error::drift detected for ${stage} (plan exit ${code})"
+            if [ "$EVENT" = "schedule" ]; then
+              title="Drift detected: ${stage}"
+              body="${RUN_URL}"$'\n\n```terraform\n'"$(head -c 60000 "${stage}/plan.log")"$'\n```'
+              number="$(gh issue list --state open --label drift --search "in:title \"${title}\"" --json number --jq '.[0].number')"
+              if [ -n "$number" ]; then
+                gh issue comment "$number" --body "$body"
+              else
+                gh issue create --title "$title" --label drift --body "$body"
+              fi
+            fi
+          done
+          exit "$failed"
+
+  plan:
+    name: plan
+    needs: [stages, drift]
+    if: >-
+      always() &&
+      needs.stages.result == 'success' &&
+      (needs.stages.outputs.action == 'plan' || needs.stages.outputs.action == 'apply') &&
+      needs.stages.outputs.any == 'true' &&
+      needs.drift.result == 'success' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ${{ fromJSON(vars.RUNNER_LABELS || '["ubuntu-24.04"]') }}
+    timeout-minutes: 30
+    concurrency:
+      group: terraform-plan-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Checkout modules
+        env:
+          MODULES_TOKEN: ${{ secrets.MODULES_READ_TOKEN }}
+        run: scripts/ci-modules.sh
+      - uses: ./.github/actions/terraform-init
+        with:
+          stage: ${{ fromJSON(needs.stages.outputs.list)[0] }}
+          service-account: ${{ vars.TF_SA }}
+          workload-identity-provider: ${{ vars.WIF_PROVIDER }}
+          state-bucket: ${{ vars.TF_STATE_BUCKET }}
+          modules-token: ${{ secrets.MODULES_READ_TOKEN }}
+          terraform-version: ${{ env.TF_VERSION }}
+      - name: Plan each stage
+        id: plan
+        env:
+          STAGES: ${{ needs.stages.outputs.list }}
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: |
+          set -euo pipefail
+          failed=0
+          : > comment.md
+          for stage in $(jq -r '.[]' <<<"$STAGES"); do
+            echo "::group::plan ${stage}"
+            terraform -chdir="$stage" init -input=false -reconfigure -backend-config="bucket=${STATE_BUCKET}"
+            terraform -chdir="$stage" validate -no-color
+            set +e
+            terraform -chdir="$stage" plan -lock=false -detailed-exitcode -no-color -out=tfplan 2>&1 | tee "${stage}/plan.log"
+            code="${PIPESTATUS[0]}"
+            set -e
+            checkov_code="skipped"
+            if [ "$code" != "1" ]; then
+              terraform -chdir="$stage" show -json tfplan > "${stage}/tfplan.json"
+              set +e
+              pipx run --spec "checkov==${CHECKOV_VERSION}" checkov -f "${stage}/tfplan.json" \
+                --framework terraform_plan --compact --quiet
+              checkov_code="$?"
+              set -e
+            fi
+            echo "::endgroup::"
+            case "$code" in
+              0) verdict="no changes" ;;
+              2) verdict="changes to apply from main once this plan looks right" ;;
+              *) verdict="FAILED" ;;
+            esac
+            {
+              echo "### Terraform plan: \`${stage}\` (${verdict})"
+              echo "Policy scan: ${checkov_code}"
+              echo
+              echo "<details><summary>Plan output</summary>"
+              echo
+              echo '```terraform'
+              head -c 20000 "${stage}/plan.log"
+              echo '```'
+              echo "</details>"
+              echo
+            } >> comment.md
+            if [ "$code" = "1" ] || { [ "$checkov_code" != "skipped" ] && [ "$checkov_code" != "0" ]; }; then
+              failed=1
+            fi
+          done
+          echo "failed=${failed}" >> "$GITHUB_OUTPUT"
+      - uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        if: always() && github.event_name == 'pull_request'
+        with:
+          header: terraform-plan
+          path: comment.md
+      - name: Fail when a plan or policy scan failed
+        if: steps.plan.outputs.failed == '1'
+        run: exit 1
+
+  plan-gate:
+    name: plan-gate
+    if: always() && github.event_name == 'pull_request'
+    needs: [stages, checks, drift, plan]
+    runs-on: ubuntu-24.04
+    permissions: {}
+    steps:
+      - name: Require every earlier stage to have succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: ${RESULTS}"
+          case " ${RESULTS} " in
+            *" failure "* | *" cancelled "*) exit 1 ;;
+          esac
+
+  apply:
+    name: apply
+    needs: [stages, plan]
+    if: >-
+      needs.stages.outputs.action == 'apply' &&
+      needs.plan.result == 'success' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ${{ fromJSON(vars.RUNNER_LABELS || '["ubuntu-24.04"]') }}
+    environment: production
+    timeout-minutes: 90
+    concurrency:
+      group: terraform-write
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Checkout modules
+        env:
+          MODULES_TOKEN: ${{ secrets.MODULES_READ_TOKEN }}
+        run: scripts/ci-modules.sh
+      - uses: ./.github/actions/terraform-init
+        with:
+          stage: ${{ fromJSON(needs.stages.outputs.list)[0] }}
+          service-account: ${{ vars.TF_SA }}
+          workload-identity-provider: ${{ vars.WIF_PROVIDER }}
+          state-bucket: ${{ vars.TF_STATE_BUCKET }}
+          modules-token: ${{ secrets.MODULES_READ_TOKEN }}
+          terraform-version: ${{ env.TF_VERSION }}
+      - name: Apply each stage
+        env:
+          STAGES: ${{ needs.stages.outputs.list }}
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: |
+          set -euo pipefail
+          for stage in $(jq -r '.[]' <<<"$STAGES"); do
+            echo "::group::${stage}"
+            terraform -chdir="$stage" init -input=false -reconfigure -backend-config="bucket=${STATE_BUCKET}"
+            terraform -chdir="$stage" validate -no-color
+            terraform -chdir="$stage" plan -input=false -lock-timeout=10m -no-color -out=tfplan
+            terraform -chdir="$stage" apply -input=false -lock-timeout=10m -no-color tfplan
+            echo "::endgroup::"
+          done

@@ -12,10 +12,10 @@ What this repository enforces in code, where, and what it deliberately leaves to
 | No direct commits to `main` | Ruleset plus `no-commit-to-branch` hook | ruleset, `.pre-commit-config.yaml` |
 | Signed commits, linear history | Ruleset | `.github/rulesets/main.json` |
 | Mandatory automated checks | `pre-commit`, `plan-gate`, `pr-title`, `dependency-review` are required status checks | ruleset, `.github/workflows/` |
-| Plan reviewed before apply | Plan is commented on the PR for each touched stage | `tf-plan.yml` |
-| Human approval to apply | `production` environment with required reviewers, no self-review, `main` only | `scripts/apply-branch-protection.sh` |
-| Serial applies | `concurrency: tf-apply`, no cancellation mid-apply | `tf-apply.yml` |
-| Drift detection | Nightly plan, issue on drift | `drift-detect.yml` |
+| Plan reviewed before apply | Feature-branch pipeline is fmt, tflint, validate, checkov, drift, then a plan comment | `.github/workflows/terraform.yml` |
+| Human approval to apply | Apply is a manual run from `main`. The `production` environment requires reviewers and does not deploy other branches | `scripts/apply-branch-protection.sh`, `.github/workflows/terraform.yml` |
+| Serial applies | `concurrency: terraform-write`, no cancellation mid-apply | `.github/workflows/terraform.yml` |
+| Drift before plan | A feature branch plans only after the base ref matches Google Cloud. Nightly drift opens an issue | `.github/workflows/terraform.yml` |
 | Reproducible toolchain | Terraform `1.16.6`, providers `~> 8.5` with a committed lock file, actions pinned to commit SHA, pre-commit hooks pinned by tag | `.terraform-version`, `.terraform.lock.hcl`, workflows |
 | Supply chain | Modules pinned by tag from one internal repository, Dependabot for actions, Terraform and hooks, dependency review on PRs | `dependabot.yml` |
 
@@ -23,14 +23,15 @@ What this repository enforces in code, where, and what it deliberately leaves to
 
 | Control | Implementation | Where |
 |---|---|---|
-| No long-lived credentials | OIDC only. Service account key creation blocked org-wide. Key upload stays on the Google organization security baseline | `1-org/policies/org-policies/iam.yaml`, `2-cicd-identity` |
-| Least privilege automation | Separate plan (read-only) and apply identities per repository | `0-core-projects/main.tf` |
-| Pull requests cannot write | Plan identity is reachable from any ref, apply identity only from `refs/heads/main`; plans run with `-lock=false` and `objectViewer` | `2-cicd-identity/main.tf`, `tf-plan.yml` |
-| Only our repositories and owner can mint tokens | Provider `attribute_condition` lists the owner and each repository | `2-cicd-identity/main.tf` |
+| No long-lived credentials | OIDC only. Service account key creation blocked org-wide. Key upload stays on the Google organization security baseline | `1-org/policies/org-policies/iam.yaml`, `3-cicd-identity` |
+| One Terraform identity | `dev-terraform-execute` in the iac-core project runs Terraform for this repository, the landing zone and every workload project. `sa-billing-reader` and `sa-logging-reader` stay separate | `0-core-projects/main.tf`, `4-workload-projects/main.tf` |
+| Landing zone manages networks it does not own | On the Network folder, `dev-terraform-execute` receives `compute.networkAdmin`, `compute.securityAdmin`, `dns.admin`, `networkconnectivity.admin`, `servicenetworking.networksAdmin` and `compute.xpnAdmin` | `1-org/main.tf` |
+| Apply needs a human | Any ref of a bound repository can impersonate `dev-terraform-execute`. Apply runs only from `main`, after the `production` environment is approved. Drift and plan use `-lock=false`. Destroy is not a workflow action | `3-cicd-identity/main.tf`, `.github/workflows/terraform.yml` |
+| Only our repositories and owner can mint tokens | Provider `attribute_condition` lists the owner and each repository | `3-cicd-identity/main.tf` |
 | Only approved OIDC issuers | `iam.workloadIdentityPoolProviders` | `1-org/org-policies.tf` |
 | Only our directory can be granted access | `iam.allowedPolicyMemberDomains` | Google organization security baseline. This stage does not manage it. |
-| Groups, not users | All human grants in code are to groups | `1-org`, `3-workload-projects/data` |
-| Default service accounts removed | `default_service_account = "delete"` in every project | stages 0 and 3 |
+| Groups, not users | All human grants in code are to groups | `1-org`, `4-workload-projects/data` |
+| Default service accounts removed | `default_service_account = "delete"` in every project | stages 0, 3 and 4 |
 | Additive org IAM | Org level IAM here is additive, so nothing it did not create is removed | `1-org/main.tf` |
 
 ### Data protection
@@ -52,7 +53,7 @@ What this repository enforces in code, where, and what it deliberately leaves to
 | Central, tamper-resistant audit log | Organization sink to a project-level log bucket in the logging project, retention at least 365 days, lock available | `1-org/main.tf` |
 | Central VPC flow logs | Separate organization sink to the `org-network` bucket. Flow logs are not mixed into the audit bucket | `1-org/main.tf` |
 | Storage access logging | Every Terraform state bucket logs to an access log bucket with a retention policy | `0-core-projects/main.tf` |
-| Workload state encrypted with a customer managed key | One keyring per workload project, 90 day rotation, used by that project's state bucket | `3-workload-projects/main.tf` |
+| Workload state encrypted with a customer managed key | One keyring per workload project, 90 day rotation, used by that project's state bucket | `4-workload-projects/main.tf` |
 
 ### Platform baseline
 
@@ -75,11 +76,12 @@ An exception is a deliberate departure from least privilege or from a control ab
 
 | Id | Exception | Reason | Owner | Review |
 |---|---|---|---|---|
-| EX-1 | `sa-tf-bootstrap-apply` holds `roles/resourcemanager.organizationAdmin` | Stage 1 manages organization IAM and organization policy. Reachable only from `main` of this repository, behind the `production` approval. | Platform engineering | Every 6 months |
-| EX-2 | Plan identities hold `roles/viewer` and `roles/iam.securityReviewer` on the organization | A plan has to read every resource it manages. Read-only. | Platform engineering | Every 6 months |
-| EX-3 | Workload deployers default to `roles/editor` plus `roles/projectIamAdmin` in their own project | A workload repository must create arbitrary resources in its project. Override per project with `deployer_roles` in the YAML. | Business unit owner | At project creation |
+| EX-1 | `dev-terraform-execute` holds `roles/resourcemanager.organizationAdmin` | Stage 1 manages organization IAM and organization policy. The apply workflow is behind the `production` approval. A pull request that impersonates this account can also write. | Platform engineering | Every 6 months |
+| EX-2 | `dev-terraform-execute` holds `roles/viewer` and `roles/iam.securityReviewer` on the organization | A plan has to read every resource it manages. The same account can write. See EX-1. | Platform engineering | Every 6 months |
+| EX-3 | `dev-terraform-execute` defaults to `roles/editor` plus `roles/projectIamAdmin` on each workload project | A workload repository must create arbitrary resources in its project. Override per project with `deployer_roles` in the YAML. | Business unit owner | At project creation |
 | EX-4 | Data access logs on for all services | Compliance needs outweigh log cost. Disable with `enable_data_access_logs = false` only with a written risk acceptance. | Security | Every year |
 | EX-5 | Module sources are pinned by release tag, not by commit hash (checkov `CKV_TF_1` is skipped) | The modules repository is internal, and a commit hash cannot be known before the vendored repository is first pushed. Mitigation: a tag ruleset on `v*` in `gcp-terraform-module` (no deletion, no update), and re-vendoring only by reviewed PR. | Platform engineering | When the modules repository exists, then every year |
+| EX-6 | `dev-terraform-execute` holds `roles/compute.xpnAdmin` on the Network folder, and on the Infrastructure and Workloads folders | `2-network-projects` enables the prod and non-prod projects as Shared VPC hosts. The landing zone attaches service projects. The role is not granted on the organization. | Platform engineering | Every 6 months |
 
 ## Not covered here
 
@@ -91,6 +93,6 @@ These need a person, another repository or a tool outside Terraform. Do not clai
 - VPC Service Controls and Access Context Manager perimeters
 - Security Command Center tier and notifications, alerting on the audit log (log based metrics and alert policies)
 - Retention lock of the audit log bucket (irreversible; `lock_audit_log_bucket`) and of the access log bucket (`lock_log_retention`), a decision for the compliance owner
-- Cloud NAT, firewall and Shared VPC (in `gcp-infrastructure-lz`)
+- VPC, Cloud NAT, firewall and Shared VPC service-project attachment (in `gcp-infrastructure-lz`). The host projects are `2-network-projects` |
 - Application level controls inside workload projects (their own repositories)
 - Evidence collection and periodic access review. Export the PR history, the plan comments, the `production` approvals and the audit log bucket as audit evidence.

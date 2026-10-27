@@ -1,6 +1,6 @@
 # 0-core-projects
 
-Org-level core projects, the customer managed key and Terraform state buckets, access logging, and the four automation service accounts (plan and apply for this repository and for `gcp-infrastructure-lz`).
+Org-level core projects, the customer managed key and Terraform state buckets, access logging, and `dev-terraform-execute`. `sa-billing-reader` and `sa-logging-reader` stay separate.
 
 **First apply is manual**, see [the runbook](../docs/runbook-bootstrap.md).
 
@@ -18,6 +18,7 @@ Org-level core projects, the customer managed key and Terraform state buckets, a
 | Name | Version |
 | ---- | ------- |
 | google | 8.8.1 |
+| google-beta | 8.8.1 |
 
 ## Modules
 
@@ -29,13 +30,10 @@ Org-level core projects, the customer managed key and Terraform state buckets, a
 | iac\_core | ../../gcp-terraform-module/modules/project | n/a |
 | kms | ../../gcp-terraform-module/modules/kms | n/a |
 | logging | ../../gcp-terraform-module/modules/project | n/a |
-| naming | ../modules/naming | n/a |
+| naming | ../../gcp-terraform-module/modules/naming | n/a |
 | sa\_billing\_reader | ../../gcp-terraform-module/modules/iam-service-account | n/a |
-| sa\_bootstrap\_apply | ../../gcp-terraform-module/modules/iam-service-account | n/a |
-| sa\_bootstrap\_plan | ../../gcp-terraform-module/modules/iam-service-account | n/a |
 | sa\_logging\_reader | ../../gcp-terraform-module/modules/iam-service-account | n/a |
-| sa\_lz\_apply | ../../gcp-terraform-module/modules/iam-service-account | n/a |
-| sa\_lz\_plan | ../../gcp-terraform-module/modules/iam-service-account | n/a |
+| sa\_terraform | ../../gcp-terraform-module/modules/iam-service-account | n/a |
 | state\_bootstrap | ../../gcp-terraform-module/modules/gcs | n/a |
 | state\_lz | ../../gcp-terraform-module/modules/gcs | n/a |
 
@@ -44,6 +42,7 @@ Org-level core projects, the customer managed key and Terraform state buckets, a
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
 | access\_log\_retention\_days | Retention, in days, of the Cloud Storage access log bucket. | `number` | `400` | no |
+| allow\_destroy | Lift deletion protection in this stage. Apply with -var allow\_destroy=true before terraform destroy. | `bool` | `false` | no |
 | billing\_account\_id | Billing account id in ABCDEF-123456-ABCDEF format. | `string` | n/a | yes |
 | cost\_center | Cost center label applied to every resource this stage creates. | `string` | n/a | yes |
 | lock\_log\_retention | Lock the retention policy of the access log bucket. Irreversible, enable only after the retention period is confirmed. | `bool` | `false` | no |
@@ -56,7 +55,7 @@ Org-level core projects, the customer managed key and Terraform state buckets, a
 | Name | Description |
 | ---- | ----------- |
 | access\_log\_bucket | Bucket that receives Cloud Storage access logs. |
-| automation\_service\_accounts | Email of each automation service account, keyed by role. |
+| automation\_service\_accounts | Email of the Terraform executor. The GitHub variable TF\_SA uses the execute key. sa-billing-reader and sa-logging-reader are not included. |
 | core\_project\_numbers | Project number of each core project. |
 | core\_projects | Project id of each core project. |
 | kms\_state\_key\_id | Id of the customer managed key that encrypts the state buckets. |

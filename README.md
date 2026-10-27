@@ -6,21 +6,23 @@ It builds the part of the Google Cloud foundation that everything else stands on
 
 | Stage | Creates | Why it is separate |
 |---|---|---|
-| [`0-core-projects`](0-core-projects/) | Org-level core projects (`iac-core`, `billing`, `logging`), CMEK key, Terraform state buckets, the four automation service accounts | Everything else depends on these. Applied by hand once, then by CI. |
+| [`0-core-projects`](0-core-projects/) | Org-root shell projects (`<prefix>-pr-iac-core`, `<prefix>-pr-billing`, `<prefix>-pr-logging`), CMEK key, Terraform state buckets, `dev-terraform-execute`, `sa-billing-reader` and `sa-logging-reader` | These sit on the organization, not in a folder. Everything else depends on them. Applied by hand once, then by CI. |
 | [`1-org`](1-org/) | Folder hierarchy, organization policies, org audit logging and sink, VPC flow-log sink, group access | Highest blast radius, smallest and slowest-changing code. |
-| [`2-cicd-identity`](2-cicd-identity/) | GitHub OIDC workload identity pool and provider, repository to service account bindings | Controls who can run Terraform at all. Workload repositories and `cicd-runners` may mint a token from the same pool. |
-| [`3-workload-projects`](3-workload-projects/) | One project per YAML file under `3-workload-projects/data/projects/`, with a deployer identity, a planner identity, a CMEK key and a state bucket | The only stage that changes often. A new project is one reviewed YAML file. |
+| [`2-network-projects`](2-network-projects/) | Shell only, under Infrastructure / Network: `<prefix>-pr-net-core`, `<prefix>-prod-net-spoke`, `<prefix>-non-prod-net-spoke` | Applied right after the folders. With prefix `demo` the ids are `demo-pr-net-core`, `demo-prod-net-spoke`, `demo-non-prod-net-spoke`. VPCs stay in `gcp-infrastructure-lz`. |
+| [`3-cicd-identity`](3-cicd-identity/) | GitHub OIDC workload identity pool and provider, repository to service account bindings | Controls who can run Terraform at all. Workload repositories and `cicd-runners` may mint a token from the same pool. |
+| [`4-workload-projects`](4-workload-projects/) | One project per YAML file under `4-workload-projects/data/projects/`, with `dev-terraform-execute` granted on that project, a CMEK key and a state bucket | The only stage that changes often. A new project is one reviewed YAML file. |
 
-Networking (hub, spokes, Shared VPC) lives in the sibling repository `gcp-infrastructure-lz`. Module code comes from `gcp-terraform-module` (vendored Cloud Foundation Fabric **v59.1.0**), pinned by tag.
+Module code comes from `gcp-terraform-module` (vendored Cloud Foundation Fabric **v59.1.0**), pinned by tag.
 
 ## How a change flows
 
 ```text
-pull request ──▶ pre-commit (fmt, validate, tflint, checkov, gitleaks, docs, actionlint)
-             ──▶ tf-plan   (read-only identity, plan commented on the PR, policy scan of the plan)
+feature branch ─▶ terraform workflow, in order:
+                  fmt, tflint, validate, checkov, drift, plan
              ──▶ 2 approvals, one from a code owner, signed commits, linear history
-merge to main ─▶ tf-apply  (production environment approval, then apply stages in order)
-every night   ─▶ drift-detect (plan only, opens an issue when reality differs from code)
+main, manual  ─▶ Actions → terraform → apply
+                  (repeats those stages, then apply after the production approval)
+every night   ─▶ drift (opens an issue when Google Cloud differs from main)
 ```
 
 See [docs/architecture.md](docs/architecture.md) for the diagrams and [docs/controls.md](docs/controls.md) for what is enforced and what is not.
@@ -41,17 +43,16 @@ See [docs/architecture.md](docs/architecture.md) for the diagrams and [docs/cont
 
 1. Read [docs/runbook-bootstrap.md](docs/runbook-bootstrap.md). The first apply is manual and needs elevated human access once.
 2. `make set-org ORG=<github-org>` replaces the `ORG` placeholder in module sources and CODEOWNERS.
-3. Edit the `terraform.tfvars` of each stage (look for `REPLACE_ME` and `000000000000`).
+3. Copy each stage's `terraform.tfvars.example` to `terraform.tfvars` and replace `REPLACE_ME` and `000000000000`. Do not commit `terraform.tfvars`.
 4. `make hooks` before your first commit. Commits that fail the hooks are rejected locally, and CI runs the same hooks.
 5. `make validate` checks every stage offline against a sibling checkout of `gcp-terraform-module`.
 
-## GitHub configuration (set after stage 2 is applied)
+## GitHub configuration (set after stage 3 is applied)
 
 | Kind | Name | Value |
 |---|---|---|
-| Variable | `WIF_PROVIDER` | Output `workload_identity_provider_name` of stage 2 |
-| Variable | `TF_PLAN_SA` | Output `automation_service_accounts.bootstrap_plan` of stage 0 |
-| Variable | `TF_APPLY_SA` | Output `automation_service_accounts.bootstrap_apply` of stage 0 |
+| Variable | `WIF_PROVIDER` | Output `workload_identity_provider_name` of stage 3 (`3-cicd-identity`) |
+| Variable | `TF_SA` | Output `automation_service_accounts.execute` of stage 0. Drift, plan and apply use this account |
 | Variable | `TF_STATE_BUCKET` | Output `state_buckets.bootstrap` of stage 0 |
 | Variable (optional) | `RUNNER_LABELS` | JSON list, for example `["self-hosted","cicd-runners"]`. Default `["ubuntu-24.04"]` |
 | Secret | `MODULES_READ_TOKEN` | Read-only credential for `gcp-terraform-module` (GitHub App installation token or fine-grained PAT, `contents: read` on that one repository) |
@@ -65,9 +66,9 @@ None of these is a long-lived Google credential. Authentication is OIDC only.
 .github/             workflows, composite action, CODEOWNERS, rulesets, templates, dependabot
 0-core-projects/     stage: core projects, state, CMEK, automation identities
 1-org/               stage: folders, org policy, audit logging, group access
-2-cicd-identity/     stage: GitHub OIDC
-3-workload-projects/ stage: workload projects from YAML (data/projects/*.yaml)
-modules/naming/      names shared by every stage and by gcp-infrastructure-lz
+2-network-projects/  stage: hub and Shared VPC host projects under the Network folder
+3-cicd-identity/     stage: GitHub OIDC
+4-workload-projects/ stage: workload projects from YAML (data/projects/*.yaml)
 config/stages.txt    apply order, read by the workflows
 docs/                architecture, runbook, controls, ADRs
 scripts/             changed-stages, offline validation, branch protection, set-org

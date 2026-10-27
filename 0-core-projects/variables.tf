@@ -1,3 +1,9 @@
+variable "allow_destroy" {
+  description = "Lift deletion protection in this stage. Apply with -var allow_destroy=true before terraform destroy."
+  type        = bool
+  default     = false
+}
+
 variable "access_log_retention_days" {
   description = "Retention, in days, of the Cloud Storage access log bucket."
   type        = number

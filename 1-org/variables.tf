@@ -1,3 +1,9 @@
+variable "allow_destroy" {
+  description = "Lift deletion protection in this stage. Apply with -var allow_destroy=true before terraform destroy."
+  type        = bool
+  default     = false
+}
+
 variable "allowed_locations" {
   description = "Value groups or regions allowed by the gcp.resourceLocations organization policy."
   type        = list(string)
@@ -29,16 +35,6 @@ variable "business_units" {
   }))
 }
 
-variable "directory_customer_id" {
-  description = "Cloud Identity customer id (C0xxxxxxx). Only identities from this directory can be granted IAM roles."
-  type        = string
-
-  validation {
-    condition     = can(regex("^C[0-9a-z]+$", var.directory_customer_id))
-    error_message = "directory_customer_id must look like C01abc234."
-  }
-}
-
 variable "domain" {
   description = "Primary domain. Essential contacts are limited to it."
   type        = string
@@ -54,7 +50,6 @@ variable "groups" {
   description = "Google groups, as email addresses. They must already exist in Cloud Identity."
   type = object({
     platform_engineers = string
-    developers         = string
   })
 }
 

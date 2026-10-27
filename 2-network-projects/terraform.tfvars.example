@@ -1,0 +1,4 @@
+# Copy to terraform.tfvars and fill in the real values. Do not commit terraform.tfvars.
+prefix             = "demo"
+billing_account_id = "000000-000000-000000"
+cost_center        = "platform"

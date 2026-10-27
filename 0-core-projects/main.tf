@@ -1,5 +1,5 @@
 module "naming" {
-  source = "../modules/naming"
+  source = "../../gcp-terraform-module/modules/naming"
   prefix = var.prefix
 }
 
@@ -33,7 +33,7 @@ locals {
   }
 }
 
-# ---------------------------------------------------------------- projects
+# projects
 
 module "iac_core" {
   source                  = "../../gcp-terraform-module/modules/project"
@@ -42,7 +42,7 @@ module "iac_core" {
   parent                  = var.organization_id
   billing_account         = var.billing_account_id
   default_service_account = "delete"
-  deletion_policy         = "PREVENT"
+  deletion_policy         = var.allow_destroy ? "DELETE" : "PREVENT"
   labels                  = local.labels
   services                = concat(local.default_apis, ["cloudkms.googleapis.com", "orgpolicy.googleapis.com"])
 }
@@ -54,7 +54,7 @@ module "billing" {
   parent                  = var.organization_id
   billing_account         = var.billing_account_id
   default_service_account = "delete"
-  deletion_policy         = "PREVENT"
+  deletion_policy         = var.allow_destroy ? "DELETE" : "PREVENT"
   labels                  = local.labels
   services                = local.default_apis
 }
@@ -66,15 +66,12 @@ module "logging" {
   parent                  = var.organization_id
   billing_account         = var.billing_account_id
   default_service_account = "delete"
-  deletion_policy         = "PREVENT"
+  deletion_policy         = var.allow_destroy ? "DELETE" : "PREVENT"
   labels                  = local.labels
   services                = concat(local.default_apis, ["orgpolicy.googleapis.com"])
 }
 
-# Domain restricted sharing is already enforced on this organization. The legacy
-# constraint only accepts a Workspace customer id, so it cannot name Google's
-# log-writer group. This project replaces that constraint with the managed one
-# and allows that single group.
+# Allow Google's log-writer group: legacy iam.allowedPolicyMemberDomains can't name it by customer id.
 resource "google_org_policy_policy" "logging_member_domains" {
   name   = "projects/${module.logging.project_id}/policies/iam.allowedPolicyMemberDomains"
   parent = "projects/${module.logging.project_id}"
@@ -111,9 +108,9 @@ resource "google_org_policy_policy" "logging_allowed_members" {
   depends_on = [module.logging]
 }
 
-# ----------------------------------------------------------------- state CMEK
+# state CMEK
 
-# Created at apply time. A data source would read pe-pr-iac-core during plan, before the project exists.
+# resource (not data source) so it is created at apply time, not read during plan.
 resource "google_project_service_identity" "gcs" {
   provider   = google-beta
   project    = module.iac_core.project_id
@@ -136,7 +133,7 @@ module "kms" {
   }
 }
 
-# The identity resource leaves email null during plan. The Cloud Storage agent address is fixed from the project number.
+# GCS agent email is stable from project number; identity email is null during plan.
 resource "google_kms_crypto_key_iam_member" "gcs_agent" {
   crypto_key_id = module.kms.keys["tfstate"].id
   role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
@@ -144,9 +141,9 @@ resource "google_kms_crypto_key_iam_member" "gcs_agent" {
   depends_on    = [google_project_service_identity.gcs]
 }
 
-# ------------------------------------------------------------------- buckets
+# buckets
 
-# Receives Cloud Storage access logs for every bucket in this stage.
+# GCS access logs for every bucket in this stage.
 module "access_logs" {
   source                      = "../../gcp-terraform-module/modules/gcs"
   depends_on                  = [google_org_policy_policy.logging_member_domains, google_org_policy_policy.logging_allowed_members]
@@ -158,7 +155,8 @@ module "access_logs" {
   versioning                  = true
   public_access_prevention    = "enforced"
   uniform_bucket_level_access = true
-  retention_policy = {
+  force_destroy               = var.allow_destroy
+  retention_policy = var.allow_destroy ? null : {
     retention_period = tostring(var.access_log_retention_days * 86400)
     is_locked        = var.lock_log_retention
   }
@@ -179,7 +177,8 @@ module "state_bootstrap" {
   encryption_key              = module.kms.keys["tfstate"].id
   public_access_prevention    = "enforced"
   uniform_bucket_level_access = true
-  soft_delete_retention       = 604800 # 7 days
+  force_destroy               = var.allow_destroy
+  soft_delete_retention       = var.allow_destroy ? 0 : 604800 # 7 days unless a destroy apply clears it
   logging_config = {
     log_bucket        = module.access_logs.name
     log_object_prefix = "tfstate-bootstrap"
@@ -191,8 +190,7 @@ module "state_bootstrap" {
     }
   }
   iam = {
-    "roles/storage.objectAdmin"  = [module.sa_bootstrap_apply.iam_email]
-    "roles/storage.objectViewer" = [module.sa_bootstrap_plan.iam_email, module.sa_lz_apply.iam_email, module.sa_lz_plan.iam_email]
+    "roles/storage.objectAdmin" = [module.sa_terraform.iam_email]
   }
 }
 
@@ -208,7 +206,8 @@ module "state_lz" {
   encryption_key              = module.kms.keys["tfstate"].id
   public_access_prevention    = "enforced"
   uniform_bucket_level_access = true
-  soft_delete_retention       = 604800
+  force_destroy               = var.allow_destroy
+  soft_delete_retention       = var.allow_destroy ? 0 : 604800
   logging_config = {
     log_bucket        = module.access_logs.name
     log_object_prefix = "tfstate-lz"
@@ -220,8 +219,7 @@ module "state_lz" {
     }
   }
   iam = {
-    "roles/storage.objectAdmin"  = [module.sa_lz_apply.iam_email]
-    "roles/storage.objectViewer" = [module.sa_lz_plan.iam_email, module.sa_bootstrap_apply.iam_email]
+    "roles/storage.objectAdmin" = [module.sa_terraform.iam_email]
   }
 }
 
@@ -235,6 +233,7 @@ module "billing_exports" {
   versioning                  = true
   public_access_prevention    = "enforced"
   uniform_bucket_level_access = true
+  force_destroy               = var.allow_destroy
   logging_config = {
     log_bucket        = module.access_logs.name
     log_object_prefix = "billing-exports"
@@ -244,13 +243,13 @@ module "billing_exports" {
   }
 }
 
-# ------------------------------------------------------ service accounts
+# service accounts
 
 locals {
-  # google_organization_iam_member.org_id is the numeric id. The organizations/ prefix is added by the provider.
+  # Strip "organizations/" prefix; provider adds it back on IAM resources.
   organization_id_numeric = trimprefix(var.organization_id, "organizations/")
 
-  # Roles every automation identity needs to use APIs through the iac-core project.
+  # Required to use iac-core as the quota project for API calls.
   quota_project_roles = ["roles/serviceusage.serviceUsageConsumer"]
 
   org_read_roles = [
@@ -261,37 +260,21 @@ locals {
   ]
 }
 
-module "sa_bootstrap_plan" {
+# Single executor for all stages. Folder roles granted in 1-org; project roles in 4-workload-projects.
+module "sa_terraform" {
   source       = "../../gcp-terraform-module/modules/iam-service-account"
   project_id   = module.iac_core.project_id
-  name         = module.naming.automation_service_account_ids["bootstrap_plan"]
-  display_name = "Terraform plan (gcp-foundation-bootstrap, pull requests)"
-  description  = "Read-only. Impersonated by pull request plans and the nightly drift check."
+  name         = module.naming.automation_service_account_ids["execute"]
+  display_name = "Terraform executor"
+  description  = "Runs Terraform for bootstrap, the landing zone and workload projects."
   iam_organization_roles = {
-    (local.organization_id_numeric) = local.org_read_roles
-  }
-  iam_project_roles = {
-    (module.iac_core.project_id) = local.quota_project_roles
-  }
-  iam_billing_roles = {
-    (var.billing_account_id) = ["roles/billing.viewer"]
-  }
-}
-
-module "sa_bootstrap_apply" {
-  source       = "../../gcp-terraform-module/modules/iam-service-account"
-  project_id   = module.iac_core.project_id
-  name         = module.naming.automation_service_account_ids["bootstrap_apply"]
-  display_name = "Terraform apply (gcp-foundation-bootstrap, main branch)"
-  description  = "Write access. Only the main branch of gcp-foundation-bootstrap can impersonate it."
-  iam_organization_roles = {
-    (local.organization_id_numeric) = [
+    (local.organization_id_numeric) = concat(local.org_read_roles, [
       "roles/logging.configWriter",
       "roles/orgpolicy.policyAdmin",
       "roles/resourcemanager.folderAdmin",
       "roles/resourcemanager.organizationAdmin", # needed for org IAM, see docs/controls.md (exception EX-1)
       "roles/resourcemanager.projectCreator",
-    ]
+    ])
   }
   iam_project_roles = {
     (module.iac_core.project_id) = concat(local.quota_project_roles, [
@@ -309,41 +292,10 @@ module "sa_bootstrap_apply" {
     ]
   }
   iam_billing_roles = {
-    (var.billing_account_id) = ["roles/billing.user"]
-  }
-}
-
-module "sa_lz_plan" {
-  source       = "../../gcp-terraform-module/modules/iam-service-account"
-  project_id   = module.iac_core.project_id
-  name         = module.naming.automation_service_account_ids["lz_plan"]
-  display_name = "Terraform plan (gcp-infrastructure-lz, pull requests)"
-  description  = "Read-only. Impersonated by pull request plans and the nightly drift check of the landing zone repository."
-  iam_organization_roles = {
-    (local.organization_id_numeric) = local.org_read_roles
-  }
-  iam_project_roles = {
-    (module.iac_core.project_id) = local.quota_project_roles
-  }
-  iam_billing_roles = {
-    (var.billing_account_id) = ["roles/billing.viewer"]
-  }
-}
-
-module "sa_lz_apply" {
-  source       = "../../gcp-terraform-module/modules/iam-service-account"
-  project_id   = module.iac_core.project_id
-  name         = module.naming.automation_service_account_ids["lz_apply"]
-  display_name = "Terraform apply (gcp-infrastructure-lz, main branch)"
-  description  = "Write access to network projects. Folder level roles are granted in stage 1-org."
-  iam_organization_roles = {
-    (local.organization_id_numeric) = ["roles/browser"]
-  }
-  iam_project_roles = {
-    (module.iac_core.project_id) = local.quota_project_roles
-  }
-  iam_billing_roles = {
-    (var.billing_account_id) = ["roles/billing.user"]
+    (var.billing_account_id) = [
+      "roles/billing.user",
+      "roles/billing.viewer",
+    ]
   }
 }
 

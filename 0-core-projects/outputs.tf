@@ -4,12 +4,9 @@ output "access_log_bucket" {
 }
 
 output "automation_service_accounts" {
-  description = "Email of each automation service account, keyed by role."
+  description = "Email of the Terraform executor. The GitHub variable TF_SA uses the execute key. sa-billing-reader and sa-logging-reader are not included."
   value = {
-    bootstrap_plan  = module.sa_bootstrap_plan.email
-    bootstrap_apply = module.sa_bootstrap_apply.email
-    lz_plan         = module.sa_lz_plan.email
-    lz_apply        = module.sa_lz_apply.email
+    execute = module.sa_terraform.email
   }
 }
 

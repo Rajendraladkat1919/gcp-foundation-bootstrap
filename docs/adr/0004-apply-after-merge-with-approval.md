@@ -1,6 +1,6 @@
 # 0004: Apply on merge, behind an environment approval
 
-Status: accepted
+Status: accepted. The merge-triggered apply is superseded by the `terraform` workflow: a feature branch plans, and apply is a manual run from `main`.
 
 ## Context
 

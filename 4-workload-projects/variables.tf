@@ -1,3 +1,9 @@
+variable "allow_destroy" {
+  description = "Lift deletion protection in this stage. Apply with -var allow_destroy=true before terraform destroy."
+  type        = bool
+  default     = false
+}
+
 variable "billing_account_id" {
   description = "Billing account id in ABCDEF-123456-ABCDEF format."
   type        = string
@@ -10,11 +16,6 @@ variable "billing_account_id" {
 
 variable "cost_center" {
   description = "Default cost center label, overridable per project in the YAML file."
-  type        = string
-}
-
-variable "github_org" {
-  description = "GitHub organization that owns the workload repositories."
   type        = string
 }
 
