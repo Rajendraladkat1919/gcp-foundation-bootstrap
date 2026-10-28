@@ -20,3 +20,9 @@ iam.automaticIamGrantsForDefaultServiceAccounts:
 iam.disableWorkloadIdentityClusterCreation:
   rules:
     - enforce: true
+
+# Prevent any principal from exempting themselves from audit logging.
+# Without this an admin can add a data-access audit exemption and hide API calls.
+iam.disableAuditLoggingExemptions:
+  rules:
+    - enforce: true

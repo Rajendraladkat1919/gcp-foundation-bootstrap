@@ -1,0 +1,16 @@
+---
+# Cloud Functions organization policies.
+
+# Only allow internal-only or internal+GCLB ingress — same posture as Cloud Run.
+cloudfunctions.allowedIngressSettings:
+  rules:
+    - allow:
+        values:
+          - ALLOW_INTERNAL_ONLY
+          - ALLOW_INTERNAL_AND_GCLB
+
+# All Cloud Functions must use a VPC connector to route egress through the VPC.
+# Prevents direct internet egress from function code which bypasses firewall controls.
+cloudfunctions.requireVPCConnector:
+  rules:
+    - enforce: true

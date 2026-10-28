@@ -23,11 +23,12 @@ What this repository enforces in code, where, and what it deliberately leaves to
 
 | Control | Implementation | Where |
 |---|---|---|
-| No long-lived credentials | OIDC only. Service account key creation blocked org-wide. Key upload stays on the Google organization security baseline | `1-org/policies/org-policies/iam.yaml`, `3-cicd-identity` |
-| One Terraform identity | `dev-terraform-execute` in the iac-core project runs Terraform for this repository, the landing zone and every workload project. `sa-billing-reader` and `sa-logging-reader` stay separate | `0-core-projects/main.tf`, `4-workload-projects/main.tf` |
-| Landing zone manages networks it does not own | On the Network folder, `dev-terraform-execute` receives `compute.networkAdmin`, `compute.securityAdmin`, `dns.admin`, `networkconnectivity.admin`, `servicenetworking.networksAdmin` and `compute.xpnAdmin` | `1-org/main.tf` |
-| Apply needs a human | Any ref of a bound repository can impersonate `dev-terraform-execute`. Apply runs only from `main`, after the `production` environment is approved. Drift and plan use `-lock=false`. Destroy is not a workflow action | `3-cicd-identity/main.tf`, `.github/workflows/terraform.yml` |
-| Only our repositories and owner can mint tokens | Provider `attribute_condition` lists the owner and each repository | `3-cicd-identity/main.tf` |
+| No long-lived credentials | OIDC only. Service account key creation and upload blocked org-wide. | `1-org/policies/org-policies/iam.yaml`, `0-core-projects/main.tf` |
+| Five scoped Terraform identities | `sa-tf-bootstrap` (bootstrap repo), `sa-tf-infra-prod/nonprod` (infra-lz repo), `sa-tf-workload-prod/nonprod` (workload repo). `sa-billing-reader`, `sa-logging-reader`, `sa-prisma-cloud` are separate operational SAs. See ADR 0007. | `0-core-projects/main.tf`, `2-network-projects/main.tf`, `4-workload-projects/main.tf` |
+| Infra SA scoped to network projects only | `sa-tf-infra-prod/nonprod` hold `compute.networkAdmin`, `compute.securityAdmin`, `dns.admin`, `networkconnectivity.admin`, `servicenetworking.networksAdmin`, `compute.xpnAdmin` on hub and spoke projects only. No org-level access. | `2-network-projects/main.tf` |
+| Apply needs a human | Apply runs from `main` only, behind the GitHub `production` environment which requires human approval. Drift and plan use `-lock=false`. | `0-core-projects/main.tf` (WIF bindings), `.github/workflows/terraform.yml` |
+| Prod credentials gated by GitHub Environment | `sa-tf-infra-prod` and `sa-tf-workload-prod` have an IAM condition `attribute.environment == "production"`. A PR plan job declares `environment: nonprod` and can only impersonate the nonprod SA — even if the workflow logic is wrong. | `0-core-projects/main.tf` |
+| Only our org can mint tokens | WIF pool-level condition: `assertion.repository_owner == var.github_org`. Per-SA bindings further restrict to a specific repository. | `0-core-projects/main.tf` |
 | Only approved OIDC issuers | `iam.workloadIdentityPoolProviders` | `1-org/org-policies.tf` |
 | Only our directory can be granted access | `iam.allowedPolicyMemberDomains` | Google organization security baseline. This stage does not manage it. |
 | Groups, not users | All human grants in code are to groups | `1-org`, `4-workload-projects/data` |
@@ -76,12 +77,12 @@ An exception is a deliberate departure from least privilege or from a control ab
 
 | Id | Exception | Reason | Owner | Review |
 |---|---|---|---|---|
-| EX-1 | `dev-terraform-execute` holds `roles/resourcemanager.organizationAdmin` | Stage 1 manages organization IAM and organization policy. The apply workflow is behind the `production` approval. A pull request that impersonates this account can also write. | Platform engineering | Every 6 months |
-| EX-2 | `dev-terraform-execute` holds `roles/viewer` and `roles/iam.securityReviewer` on the organization | A plan has to read every resource it manages. The same account can write. See EX-1. | Platform engineering | Every 6 months |
-| EX-3 | `dev-terraform-execute` defaults to `roles/editor` plus `roles/projectIamAdmin` on each workload project | A workload repository must create arbitrary resources in its project. Override per project with `deployer_roles` in the YAML. | Business unit owner | At project creation |
+| EX-1 | `sa-tf-bootstrap` holds `roles/resourcemanager.organizationAdmin` | Stage 1 manages organization IAM and organization policy. The apply workflow is behind the `production` approval. The WIF binding restricts impersonation to `gcp-foundation-bootstrap` repo only. | Platform engineering | Every 6 months |
+| EX-2 | `sa-tf-bootstrap` holds `roles/viewer` and `roles/iam.securityReviewer` on the organization | A plan must read every resource it manages. Infra and workload SAs do not hold these roles. | Platform engineering | Every 6 months |
+| EX-3 | `sa-tf-workload-prod/nonprod` default to `roles/editor` plus `roles/projectIamAdmin` on each workload project | A workload repository must create arbitrary resources. Override per project with `deployer_roles` in the YAML. Bootstrap SA holds only `projectIamAdmin` and `serviceUsageAdmin` on the same projects. | Business unit owner | At project creation |
 | EX-4 | Data access logs on for all services | Compliance needs outweigh log cost. Disable with `enable_data_access_logs = false` only with a written risk acceptance. | Security | Every year |
 | EX-5 | Module sources are pinned by release tag, not by commit hash (checkov `CKV_TF_1` is skipped) | The modules repository is internal, and a commit hash cannot be known before the vendored repository is first pushed. Mitigation: a tag ruleset on `v*` in `gcp-terraform-module` (no deletion, no update), and re-vendoring only by reviewed PR. | Platform engineering | When the modules repository exists, then every year |
-| EX-6 | `dev-terraform-execute` holds `roles/compute.xpnAdmin` on the Network folder, and on the Infrastructure and Workloads folders | `2-network-projects` enables the prod and non-prod projects as Shared VPC hosts. The landing zone attaches service projects. The role is not granted on the organization. | Platform engineering | Every 6 months |
+| EX-6 | `sa-tf-bootstrap` holds `roles/compute.xpnAdmin` on the Infrastructure and Workloads folders | `2-network-projects` enables the prod and non-prod projects as Shared VPC hosts. The landing zone attaches service projects. The role is not granted at the organization level. | Platform engineering | Every 6 months |
 
 ## Not covered here
 

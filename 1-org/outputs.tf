@@ -1,3 +1,14 @@
+output "sa_emails" {
+  description = "Terraform executor SA emails keyed by role. Stages 2 and 4 read this to avoid recomputing SA emails from the naming module independently."
+  value = {
+    bootstrap        = "sa-tf-bootstrap@${module.naming.core_project_ids["iac_core"]}.iam.gserviceaccount.com"
+    infra_prod       = "sa-tf-infra-prod@${module.naming.core_project_ids["iac_core"]}.iam.gserviceaccount.com"
+    infra_nonprod    = "sa-tf-infra-nonprod@${module.naming.core_project_ids["iac_core"]}.iam.gserviceaccount.com"
+    workload_prod    = "sa-tf-workload-prod@${module.naming.core_project_ids["iac_core"]}.iam.gserviceaccount.com"
+    workload_nonprod = "sa-tf-workload-nonprod@${module.naming.core_project_ids["iac_core"]}.iam.gserviceaccount.com"
+  }
+}
+
 output "audit_log_bucket_id" {
   description = "Id of the central audit log bucket."
   value       = module.audit_log_bucket.id

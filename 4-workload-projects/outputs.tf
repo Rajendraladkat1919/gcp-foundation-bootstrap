@@ -12,8 +12,8 @@ output "projects" {
       # SA to use in gcp-workload GitHub Actions workflow for this project's environment.
       workload_sa_email = (
         v.environment == "prod"
-        ? "sa-tf-workload-prod@${local.iac_core_project}.iam.gserviceaccount.com"
-        : "sa-tf-workload-nonprod@${local.iac_core_project}.iam.gserviceaccount.com"
+        ? data.terraform_remote_state.org.outputs.sa_emails.workload_prod
+        : data.terraform_remote_state.org.outputs.sa_emails.workload_nonprod
       )
     }
   }

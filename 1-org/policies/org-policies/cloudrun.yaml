@@ -1,0 +1,11 @@
+---
+# Cloud Run organization policies.
+# All workloads run inside the VPC and should not be reachable from the internet directly.
+# Internet-facing access goes through a load balancer that is itself subject to Cloud Armor.
+
+run.allowedIngress:
+  rules:
+    - allow:
+        values:
+          - INGRESS_TRAFFIC_INTERNAL_ONLY
+          - INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER

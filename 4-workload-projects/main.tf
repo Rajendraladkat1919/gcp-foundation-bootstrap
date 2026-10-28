@@ -45,12 +45,10 @@ locals {
   files    = fileset("${path.module}/data/projects", "*.yaml")
   projects = { for f in local.files : trimsuffix(f, ".yaml") => yamldecode(file("${path.module}/data/projects/${f}")) }
 
-  iac_core_project = module.naming.core_project_ids["iac_core"]
-
-  # Explicit SA emails — decoupled from the naming module.
-  bootstrap_sa      = "serviceAccount:sa-tf-bootstrap@${local.iac_core_project}.iam.gserviceaccount.com"
-  workload_prod_sa  = "serviceAccount:sa-tf-workload-prod@${local.iac_core_project}.iam.gserviceaccount.com"
-  workload_nonprod_sa = "serviceAccount:sa-tf-workload-nonprod@${local.iac_core_project}.iam.gserviceaccount.com"
+  # SA emails are the single source of truth from Stage 1 — no local recomputation.
+  bootstrap_sa        = "serviceAccount:${data.terraform_remote_state.org.outputs.sa_emails.bootstrap}"
+  workload_prod_sa    = "serviceAccount:${data.terraform_remote_state.org.outputs.sa_emails.workload_prod}"
+  workload_nonprod_sa = "serviceAccount:${data.terraform_remote_state.org.outputs.sa_emails.workload_nonprod}"
 }
 
 # ─────────────────────────────────────────────── workload project creation

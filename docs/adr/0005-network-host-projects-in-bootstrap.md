@@ -16,4 +16,4 @@ Stage `2-network-projects` creates the shell only: `<prefix>-pr-net-core`, `<pre
 
 - Apply this stage immediately after `1-org`, before identity, workload projects and the landing zone.
 - Project ids are fixed in `gcp-terraform-module/modules/naming`. Renaming one is a breaking change for `gcp-infrastructure-lz`.
-- `dev-terraform-execute` holds the network roles and `roles/compute.xpnAdmin` on the Network folder. See [ADR 0006](0006-one-terraform-service-account.md).
+- `sa-tf-infra-prod` and `sa-tf-infra-nonprod` hold the network roles on hub and their respective spoke projects. `sa-tf-bootstrap` holds `roles/compute.xpnAdmin` on the Infrastructure and Workloads folders. See [ADR 0007](0007-five-scoped-service-accounts.md).

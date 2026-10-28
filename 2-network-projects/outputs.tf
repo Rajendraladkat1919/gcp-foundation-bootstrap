@@ -26,7 +26,7 @@ output "projects" {
 output "infra_sa_emails" {
   description = "Infra SA emails pre-granted on network projects. Set these as TF_SA in gcp-infrastructure-lz."
   value = {
-    prod    = "sa-tf-infra-prod@${local.iac_core_project}.iam.gserviceaccount.com"
-    nonprod = "sa-tf-infra-nonprod@${local.iac_core_project}.iam.gserviceaccount.com"
+    prod    = local.infra_prod_email
+    nonprod = local.infra_nonprod_email
   }
 }

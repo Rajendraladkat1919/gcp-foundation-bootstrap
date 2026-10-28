@@ -1,6 +1,6 @@
 # 0006: One Terraform service account
 
-Status: accepted
+Status: superseded by [0007](0007-five-scoped-service-accounts.md)
 
 Supersedes the separate plan and apply service accounts in ADR 0002. OIDC and the ban on service account keys in that ADR still stand. Also supersedes the identity names in the consequences of ADR 0005.
 

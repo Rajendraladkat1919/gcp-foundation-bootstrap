@@ -16,28 +16,33 @@ Core projects are created directly under the organization. They are not placed i
 
 ```text
 Organization example.com (000000000000)
-├── demo-pr-iac-core          state, CMEK, automation service accounts, GitHub pool
-├── demo-pr-billing           billing export bucket
-├── demo-pr-logging           organization audit logs, flow logs, access logs
-├── Infrastructure/                             deletion protection on
-│   ├── Network                                 hub, prod host and non-prod host (stage 4, not applied yet)
-│   ├── Prod
-│   └── Non-Prod
+├── demo-pr-iac-core     state, CMEK, 5 Terraform SAs, WIF pool + provider
+├── demo-pr-billing      billing export bucket, BigQuery billing_export dataset
+├── demo-pr-logging      org audit logs, VPC flow logs, access logs, monitoring
+├── Infrastructure/                              deletion protection on
+│   └── Network/                                 all three network projects live here
+│       ├── demo-net-core-hub                    NCC hub, VPN, Interconnect
+│       ├── demo-net-shared-prod                 Shared VPC host — production
+│       └── demo-net-shared-nonprod              Shared VPC host — non-production
 └── Workloads/
-    └── Business Unit 0/
-        ├── Prod/demo-pr-prod-bu-0
-        └── Non-Prod/demo-np-nonprod-bu-0
+    ├── Business Unit 0/
+    │   ├── Prod/demo-pr-prod-bu-0
+    │   └── Non-Prod/demo-np-nonprod-bu-0
+    └── Business Unit 1/
+        ├── Prod/demo-pr-prod-bu-1
+        └── Non-Prod/demo-np-nonprod-bu-1
 ```
 
 | Stage | State prefix in `demo-pr-tfstate-bootstrap` | Depends on |
 |---|---|---|
 | `0-core-projects` | `bootstrap/0-core-projects` | Organization, billing account |
-| `1-org` | `bootstrap/1-org` | Stage 0 project ids, derived from prefix `demo` |
-| `3-cicd-identity` | `bootstrap/2-cicd-identity` | Stage 0 service accounts, GitHub organization name |
-| `4-workload-projects` | `bootstrap/3-workload-projects` | Stage 1 folder ids and stage 2 pool name, both read from remote state |
-| `2-network-projects` | `bootstrap/2-network-projects` | Stage 1 folder id `infrastructure/network`. Not applied on this organization yet |
+| `1-org` | `bootstrap/1-org` | Stage 0 project IDs (naming module) |
+| `2-network-projects` | `bootstrap/2-network-projects` | Stage 1 folder ID `infrastructure/network` |
+| `4-workload-projects` | `bootstrap/3-workload-projects` | Stage 1 folder IDs and SA emails (remote state) |
 
-`gcp-infrastructure-lz` is a separate repository. It reads `projects` from stage 3 and builds VPCs in the stage 4 host projects. It does not create those projects. `folder_ids`, workload `projects` and network `projects` are the contract. Changing them is a breaking change for the landing zone.
+Stage 3 (`3-cicd-identity`) was removed. The WIF pool and all SA WIF bindings are now in Stage 0 so identity exists before any CI pipeline runs.
+
+`gcp-infrastructure-lz` reads `projects` from Stage 2 (network projects) and Stage 1 (`folder_ids`) to build VPCs. It does not create host projects. `gcp-workload` reads `projects` from Stage 4 for project IDs and workload SA emails. Changing any of those outputs is a breaking change for the downstream repositories.
 
 Workload projects are not listed in HCL. One YAML file under `4-workload-projects/data/projects/` creates one project, two identities, one CMEK key, and one state bucket.
 
@@ -54,7 +59,7 @@ Workload projects are not listed in HCL. One YAML file under `4-workload-project
 | Break-glass user for the first apply | `operator@example.com` |
 | Module source used on the machine that applied | `../../gcp-terraform-module` |
 
-`3-cicd-identity/terraform.tfvars` and any later stage that sets `github_org` must use the GitHub organization name, not a URL. A leftover `REPLACE_ME` binds the workload identities to the wrong repository owner.
+`0-core-projects/terraform.tfvars` sets `github_org`. Use the GitHub organization name, not a URL (e.g. `"acme"` not `"https://github.com/acme"`). A wrong value here causes WIF to reject every token from your repositories.
 
 ## Prerequisites
 
@@ -101,11 +106,17 @@ These stay after the human's temporary roles are removed.
 
 The first apply created `sa-tf-bootstrap-plan`, `sa-tf-bootstrap-apply`, `sa-tf-lz-plan`, `sa-tf-lz-apply`, and `sa-wlp-deployer` plus `sa-wlp-planner` in each workload project. The current code replaces those with `dev-terraform-execute` on the next apply of stages 0, 1, 3 and 4. `sa-billing-reader` and `sa-logging-reader` stay.
 
-### Automation service account in `demo-pr-iac-core`
+### Terraform executor service accounts in `demo-pr-iac-core`
 
-| Account | Where it is used | Roles |
+See ADR 0007 for the full rationale. All five SAs live in `pr-iac-core`. Permissions are granted progressively as the skeleton is built.
+
+| Account | Bound repository | Org / cross-project roles |
 |---|---|---|
-| `dev-terraform-execute@demo-pr-iac-core.iam.gserviceaccount.com` | Terraform for this repository, `gcp-infrastructure-lz` and every workload project | Organization: `organizationAdmin`, `folderAdmin`, `projectCreator`, `orgpolicy.policyAdmin`, `logging.configWriter`, `browser`, `viewer`, `iam.securityReviewer`, `orgpolicy.policyViewer`. Billing: `billing.user`, `billing.viewer`. On `demo-pr-iac-core`: service usage admin and consumer, KMS admin, service account admin, Workload Identity pool admin, project IAM admin, storage admin. On `demo-pr-logging`: logging admin, project IAM admin, storage admin. State: `objectAdmin` on both state buckets. On each workload project: `editor` and `projectIamAdmin` unless the YAML overrides `deployer_roles`, plus `objectAdmin` on that project's state bucket |
+| `sa-tf-bootstrap` | `gcp-foundation-bootstrap` (any env) | Org: `organizationAdmin`, `folderAdmin`, `projectCreator`, `orgpolicy.policyAdmin`, `logging.configWriter`, `essentialcontacts.admin`, `browser`, `viewer`, `iam.securityReviewer`. Billing: `billing.user`, `billing.viewer`. On `pr-iac-core`: KMS admin, SA admin, WIF pool admin, Pub/Sub admin, BigQuery admin, storage admin. On `pr-logging`: logging admin, storage admin. On `pr-billing`: BigQuery admin. State `bootstrap` bucket: `objectAdmin`. |
+| `sa-tf-infra-prod` | `gcp-infrastructure-lz` (env=production) | On hub + shared-prod: `compute.networkAdmin`, `compute.securityAdmin`, `dns.admin`, `networkconnectivity.admin`, `servicenetworking.networksAdmin`, `compute.xpnAdmin`. State `lz` bucket: `objectAdmin`. |
+| `sa-tf-infra-nonprod` | `gcp-infrastructure-lz` (env=nonprod) | Same roles as infra-prod on hub + shared-nonprod. State `lz` bucket: `objectAdmin`. |
+| `sa-tf-workload-prod` | `gcp-workload` (env=production) | On prod workload projects: `editor`, `projectIamAdmin`, `secretmanager.admin`, `serviceAccountAdmin`. Each prod workload state bucket: `objectAdmin`. |
+| `sa-tf-workload-nonprod` | `gcp-workload` (env=nonprod) | Same roles on nonprod workload projects and state buckets. |
 
 `dev-terraform-execute` holding `roles/resourcemanager.organizationAdmin` is exception EX-1 in [controls.md](controls.md). The apply workflow still waits for the GitHub `production` environment. The account itself can write from a pull request of a bound repository.
 

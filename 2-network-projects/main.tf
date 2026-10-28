@@ -20,8 +20,11 @@ locals {
   #       ├── <prefix>-net-shared-prod     (Shared VPC host for prod workloads)
   #       └── <prefix>-net-shared-nonprod  (Shared VPC host for nonprod workloads)
   #
-  network_folder   = data.terraform_remote_state.org.outputs.folder_ids["infrastructure/network"]
-  iac_core_project = module.naming.core_project_ids["iac_core"]
+  network_folder = data.terraform_remote_state.org.outputs.folder_ids["infrastructure/network"]
+
+  # SA emails are the single source of truth from Stage 1 — no local recomputation.
+  infra_prod_email    = data.terraform_remote_state.org.outputs.sa_emails.infra_prod
+  infra_nonprod_email = data.terraform_remote_state.org.outputs.sa_emails.infra_nonprod
 
   base_apis = [
     "cloudbilling.googleapis.com",
@@ -90,14 +93,14 @@ locals {
   infra_sa_grants = merge(
     { for pair in setproduct(["hub", "shared-prod"], local.infra_network_roles) :
       "prod-${pair[0]}-${replace(pair[1], "roles/", "")}" => {
-        sa      = "serviceAccount:sa-tf-infra-prod@${local.iac_core_project}.iam.gserviceaccount.com"
+        sa      = "serviceAccount:${local.infra_prod_email}"
         project = module.project[pair[0]].project_id
         role    = pair[1]
       }
     },
     { for pair in setproduct(["hub", "shared-nonprod"], local.infra_network_roles) :
       "nonprod-${pair[0]}-${replace(pair[1], "roles/", "")}" => {
-        sa      = "serviceAccount:sa-tf-infra-nonprod@${local.iac_core_project}.iam.gserviceaccount.com"
+        sa      = "serviceAccount:${local.infra_nonprod_email}"
         project = module.project[pair[0]].project_id
         role    = pair[1]
       }

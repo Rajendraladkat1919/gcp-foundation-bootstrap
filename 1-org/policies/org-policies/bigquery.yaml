@@ -1,0 +1,19 @@
+---
+# BigQuery organization policies.
+
+# Prevent BigQuery datasets from using external GCS tables.
+# External tables bypass row/column access policies and can exfiltrate data.
+bigquery.disableGcsExternalDatasets:
+  rules:
+    - enforce: true
+
+# Disable BigQuery Omni on AWS and Azure.
+# Omni allows query execution outside the GCP org boundary which conflicts with
+# data residency and cross-cloud data-egress controls.
+bigquery.disableBQOmniAWS:
+  rules:
+    - enforce: true
+
+bigquery.disableBQOmniAzure:
+  rules:
+    - enforce: true

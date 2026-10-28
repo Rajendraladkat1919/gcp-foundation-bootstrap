@@ -7,6 +7,7 @@
 | [0003](0003-modules-from-internal-repo-by-tag.md) | Modules come from `gcp-terraform-module`, pinned by tag |
 | [0004](0004-apply-after-merge-with-approval.md) | Apply on merge, behind an environment approval |
 | [0005](0005-network-host-projects-in-bootstrap.md) | Hub and Shared VPC host projects are created under the Network folder |
-| [0006](0006-one-terraform-service-account.md) | One service account, `dev-terraform-execute`, runs all Terraform |
+| [0006](0006-one-terraform-service-account.md) | ~~One service account runs all Terraform~~ — superseded by 0007 |
+| [0007](0007-five-scoped-service-accounts.md) | Five scoped SAs with environment-segregated WIF bindings replace the single SA |
 
 Add a new file with the next number for every decision that is expensive to reverse. Do not edit an accepted ADR, supersede it.
