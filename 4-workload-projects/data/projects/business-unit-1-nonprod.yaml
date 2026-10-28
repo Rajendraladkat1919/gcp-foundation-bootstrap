@@ -1,5 +1,5 @@
 # One file per workload project. Merge a new file to get a project, a grant of
-# dev-terraform-execute on that project, and a state bucket.
+# sa-tf-bootstrap creates the project; sa-tf-workload-* deploys into it, and a state bucket.
 business_unit: business-unit-1
 environment: nonprod         # prod | nonprod
 short_name: bu-1             # project id = <prefix>-<env code>-<environment>-<short_name>

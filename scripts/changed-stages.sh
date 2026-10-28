@@ -16,17 +16,16 @@ else
   fi
 fi
 
-# The identity stage names every workload repository in the pool condition and
-# lets that repository impersonate dev-terraform-execute. A new YAML re-applies it.
-yaml_touches_identity=false
+# A new workload YAML also touches Stage 0 because Stage 0 owns all WIF bindings
+# and State bucket IAM. Re-apply Stage 0 when YAML files are added or removed.
 if [[ "$run_all" == false ]] && grep -qE '^4-workload-projects/data/projects/.*\.yaml$' <<<"$changed"; then
-  yaml_touches_identity=true
+  changed="0-core-projects/dummy"$'\n'"$changed"
 fi
 
 selected=""
 while IFS= read -r stage; do
   [[ -z "$stage" || "$stage" == \#* ]] && continue
-  if [[ "$run_all" == true ]] || grep -q "^${stage}/" <<<"$changed" || { [[ "$stage" == "3-cicd-identity" ]] && [[ "$yaml_touches_identity" == true ]]; }; then
+  if [[ "$run_all" == true ]] || grep -q "^${stage}/" <<<"$changed"; then
     selected+="${stage}"$'\n'
   fi
 done <config/stages.txt

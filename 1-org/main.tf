@@ -5,9 +5,10 @@ module "naming" {
 
 locals {
   # ── Convenience references ───────────────────────────────────────────────────
-  terraform_executor     = "serviceAccount:${module.naming.automation_service_account_emails["execute"]}"
   org_id_numeric         = trimprefix(var.organization_id, "organizations/")
   iac_core_project       = module.naming.core_project_ids["iac_core"]
+  # sa-tf-bootstrap owns all bootstrap stages; explicit email avoids naming-module coupling.
+  terraform_executor     = "serviceAccount:sa-tf-bootstrap@${local.iac_core_project}.iam.gserviceaccount.com"
   logging_project        = module.naming.core_project_ids["logging"]
   xsiam_topic_resource   = "pubsub.googleapis.com/projects/${local.iac_core_project}/topics/${var.prefix}-pr-xsiam"
   prisma_cloud_sa_member = "serviceAccount:sa-prisma-cloud@${local.iac_core_project}.iam.gserviceaccount.com"

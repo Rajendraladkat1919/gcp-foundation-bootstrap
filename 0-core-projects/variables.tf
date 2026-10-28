@@ -73,3 +73,28 @@ variable "security_contact_email" {
   type        = string
   default     = ""
 }
+
+# ── WIF / GitHub identity variables ──────────────────────────────────────────
+
+variable "github_org" {
+  description = "GitHub organisation name (the part after github.com/). Used as the WIF pool-level attribute condition and in per-SA IAM binding conditions."
+  type        = string
+}
+
+variable "bootstrap_repository" {
+  description = "GitHub repository that runs this bootstrap. Only this repo may impersonate sa-tf-bootstrap."
+  type        = string
+  default     = "gcp-foundation-bootstrap"
+}
+
+variable "infra_lz_repository" {
+  description = "GitHub repository for the landing-zone network infrastructure. sa-tf-infra-prod and sa-tf-infra-nonprod are scoped to this repo."
+  type        = string
+  default     = "gcp-infrastructure-lz"
+}
+
+variable "workload_repository" {
+  description = "GitHub repository for application workloads. sa-tf-workload-prod and sa-tf-workload-nonprod are scoped to this repo."
+  type        = string
+  default     = "gcp-workload"
+}

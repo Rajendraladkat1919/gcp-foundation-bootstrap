@@ -1,6 +1,21 @@
-# Copy to terraform.tfvars and fill in the real values. Do not commit terraform.tfvars.
+# Copy to terraform.tfvars and fill in real values. Do NOT commit terraform.tfvars.
+
+# ── Core identity ──────────────────────────────────────────────────────────────
 prefix             = "demo"
 organization_id    = "organizations/000000000000"
 billing_account_id = "000000-000000-000000"
 cost_center        = "platform"
 region             = "us-west2"
+
+# ── GitHub / WIF identity ──────────────────────────────────────────────────────
+# github_org is the organisation slug in your repo URLs:
+#   github.com/acme/gcp-foundation-bootstrap  →  github_org = "acme"
+github_org           = "your-github-org"
+bootstrap_repository = "gcp-foundation-bootstrap"  # rename only if the repo is renamed
+infra_lz_repository  = "gcp-infrastructure-lz"     # rename only if the repo is renamed
+workload_repository  = "gcp-workload"              # rename only if the repo is renamed
+
+# ── Optional integrations ──────────────────────────────────────────────────────
+# enable_prisma_cloud    = false   # true → creates sa-prisma-cloud with org read-only roles
+# enable_scc             = false   # true → enables SCC (activate Premium in Console first)
+# security_contact_email = ""      # email / Google Group for Essential Contacts security alerts

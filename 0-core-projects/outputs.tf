@@ -4,10 +4,19 @@ output "access_log_bucket" {
 }
 
 output "automation_service_accounts" {
-  description = "Email of the Terraform executor. The GitHub variable TF_SA uses the execute key."
+  description = "Terraform executor SA emails. Set these as GitHub Actions variables in each repo."
   value = {
-    execute = module.sa_terraform.email
+    bootstrap      = module.sa_tf_bootstrap.email       # TF_SA_BOOTSTRAP in gcp-foundation-bootstrap
+    infra_prod     = module.sa_tf_infra_prod.email      # TF_SA in gcp-infrastructure-lz (prod env)
+    infra_nonprod  = module.sa_tf_infra_nonprod.email   # TF_SA in gcp-infrastructure-lz (nonprod env)
+    workload_prod  = module.sa_tf_workload_prod.email   # TF_SA in gcp-workload (prod env)
+    workload_nonprod = module.sa_tf_workload_nonprod.email # TF_SA in gcp-workload (nonprod env)
   }
+}
+
+output "wif_provider" {
+  description = "WIF provider resource name. Set as WIF_PROVIDER in every GitHub repo that authenticates to GCP."
+  value       = module.github_wif.provider_name
 }
 
 output "core_project_numbers" {
@@ -40,11 +49,11 @@ output "billing_export_dataset" {
 }
 
 output "xsiam_pubsub_topic" {
-  description = "Pub/Sub topic id that receives org-level security events for XSIAM. Stage 1 creates the log sinks that write here."
+  description = "Pub/Sub topic id that receives org-level security events for XSIAM."
   value       = google_pubsub_topic.xsiam.id
 }
 
 output "prisma_cloud_sa_email" {
-  description = "Prisma Cloud CSPM service account email. Register this in Prisma Cloud → Settings → Cloud Accounts. Null when enable_prisma_cloud is false."
+  description = "Prisma Cloud CSPM service account email. Null when enable_prisma_cloud is false."
   value       = var.enable_prisma_cloud ? module.sa_prisma_cloud[0].email : null
 }

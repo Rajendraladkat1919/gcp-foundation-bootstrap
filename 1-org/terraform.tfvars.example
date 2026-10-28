@@ -1,18 +1,42 @@
-# Copy to terraform.tfvars and fill in the real values. Do not commit terraform.tfvars.
-prefix                = "demo"
-organization_id       = "organizations/000000000000"
-directory_customer_id = "REPLACE_ME"   # Cloud Identity customer id, e.g. C01abc234
-domain                = "example.com"
-region                = "us-west2"
+# Copy to terraform.tfvars and fill in real values. Do NOT commit terraform.tfvars.
 
+# ── Core identity ──────────────────────────────────────────────────────────────
+prefix          = "demo"
+organization_id = "organizations/000000000000"
+domain          = "example.com"
+region          = "us-west2"
+
+# ── Groups (Okta SCIM provisioned into Cloud Identity) ────────────────────────
+# Only platform_engineers is required. Add the others once the groups exist.
 groups = {
   platform_engineers = "platform-engineers@example.com"
-  developers         = "developers@example.com"
+
+  # Optional — leave as "" to skip the IAM binding for that group.
+  audit_viewers      = ""   # e.g. "audit-viewers@example.com"
+  billing_viewers    = ""   # e.g. "billing-viewers@example.com"
+  network_viewers    = ""   # e.g. "network-viewers@example.com"
+  security_reviewers = ""   # e.g. "security-reviewers@example.com"
+  break_glass        = ""   # e.g. "break-glass@example.com"
 }
 
+# ── Business units ─────────────────────────────────────────────────────────────
+# Each entry creates a Workloads/<display_name>/{Prod,NonProd} folder triple.
+# Add business-unit-1 once the BU-1 workload YAML files are ready.
 business_units = {
   business-unit-0 = {
     display_name = "Business Unit 0"
     group        = "business-unit-0@example.com"
   }
+  business-unit-1 = {
+    display_name = "Business Unit 1"
+    group        = "business-unit-1@example.com"
+  }
 }
+
+# ── Optional features ──────────────────────────────────────────────────────────
+# enable_scc                    = false   # true → SCC notification config (activate in Console first)
+# enable_data_access_logs       = true    # false to save log volume costs
+# security_contact_email        = ""      # e.g. "security@example.com"
+# monitoring_notification_email = ""      # e.g. "alerts@example.com"
+# audit_log_retention_days      = 400
+# network_log_retention_days    = 30

@@ -1,9 +1,13 @@
 # Ordered list of Terraform stages. Applied top to bottom, one directory each.
 # Workflows read this file, so adding a stage never requires a workflow edit.
-# Network projects are applied immediately after the folder hierarchy.
-# Cicd and workload keep the state prefixes they were first applied under.
+#
+# Stage 0: core projects, ALL service accounts (sa-tf-bootstrap/infra-*/workload-*), WIF pool
+# Stage 1: folder hierarchy, org policies, audit logging, monitoring
+# Stage 2: network projects + grant infra SAs on hub/shared-prod/shared-nonprod
+# Stage 4: workload projects + grant workload SAs per environment
+#
+# Note: Stage 3 (3-cicd-identity) was removed. WIF and SA identity are now in Stage 0.
 0-core-projects
 1-org
 2-network-projects
-3-cicd-identity
 4-workload-projects

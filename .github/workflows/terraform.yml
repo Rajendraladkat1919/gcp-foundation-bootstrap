@@ -118,6 +118,7 @@ jobs:
       (needs.checks.result == 'success' || needs.checks.result == 'skipped') &&
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ${{ fromJSON(vars.RUNNER_LABELS || '["ubuntu-24.04"]') }}
+    environment: nonprod   # populates assertion.environment in OIDC token for WIF audit trail
     timeout-minutes: 30
     permissions:
       contents: read
@@ -163,7 +164,7 @@ jobs:
         if: steps.first.outputs.stage != ''
         with:
           stage: ${{ steps.first.outputs.stage }}
-          service-account: ${{ vars.TF_SA }}
+          service-account: ${{ vars.TF_SA_BOOTSTRAP }}
           workload-identity-provider: ${{ vars.WIF_PROVIDER }}
           state-bucket: ${{ vars.TF_STATE_BUCKET }}
           modules-token: ${{ secrets.MODULES_READ_TOKEN }}
@@ -220,6 +221,7 @@ jobs:
       needs.drift.result == 'success' &&
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ${{ fromJSON(vars.RUNNER_LABELS || '["ubuntu-24.04"]') }}
+    environment: nonprod   # populates assertion.environment in OIDC token for WIF audit trail
     timeout-minutes: 30
     concurrency:
       group: terraform-plan-${{ github.event.pull_request.number || github.run_id }}
@@ -239,7 +241,7 @@ jobs:
       - uses: ./.github/actions/terraform-init
         with:
           stage: ${{ fromJSON(needs.stages.outputs.list)[0] }}
-          service-account: ${{ vars.TF_SA }}
+          service-account: ${{ vars.TF_SA_BOOTSTRAP }}
           workload-identity-provider: ${{ vars.WIF_PROVIDER }}
           state-bucket: ${{ vars.TF_STATE_BUCKET }}
           modules-token: ${{ secrets.MODULES_READ_TOKEN }}
@@ -345,7 +347,7 @@ jobs:
       - uses: ./.github/actions/terraform-init
         with:
           stage: ${{ fromJSON(needs.stages.outputs.list)[0] }}
-          service-account: ${{ vars.TF_SA }}
+          service-account: ${{ vars.TF_SA_BOOTSTRAP }}
           workload-identity-provider: ${{ vars.WIF_PROVIDER }}
           state-bucket: ${{ vars.TF_STATE_BUCKET }}
           modules-token: ${{ secrets.MODULES_READ_TOKEN }}

@@ -1,5 +1,5 @@
 # One file per workload project. Merge a new file to get a project, a grant of
-# dev-terraform-execute on that project, and a state bucket.
+# sa-tf-bootstrap creates the project; sa-tf-workload-* deploys into it, and a state bucket.
 business_unit: business-unit-1
 environment: prod            # prod | nonprod
 short_name: bu-1             # project id = <prefix>-<env code>-<environment>-<short_name>
@@ -9,7 +9,7 @@ cost_center: platform
 # bigquery, secret manager, storage, compute, cloudkms). The stage creates the
 # Cloud KMS key that encrypts this project's state bucket.
 # extra_apis: []
-# Extra roles for dev-terraform-execute on this project. The default is editor plus project IAM admin.
+# deployer_roles: override the default workload SA roles (editor + projectIamAdmin + secretmanager.admin + serviceAccountAdmin).
 # deployer_roles: []
 # Human access. Principals must be groups, never individual users.
 iam_groups:

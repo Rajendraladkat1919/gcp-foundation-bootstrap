@@ -20,7 +20,8 @@ locals {
   #       ├── <prefix>-net-shared-prod     (Shared VPC host for prod workloads)
   #       └── <prefix>-net-shared-nonprod  (Shared VPC host for nonprod workloads)
   #
-  network_folder = data.terraform_remote_state.org.outputs.folder_ids["infrastructure/network"]
+  network_folder   = data.terraform_remote_state.org.outputs.folder_ids["infrastructure/network"]
+  iac_core_project = module.naming.core_project_ids["iac_core"]
 
   base_apis = [
     "cloudbilling.googleapis.com",
@@ -71,7 +72,40 @@ locals {
       services        = concat(local.base_apis, local.spoke_extra_apis)
     }
   }
+
+  # Roles that sa-tf-infra-* need to manage VPC, NCC, DNS, and firewall.
+  infra_network_roles = [
+    "roles/compute.networkAdmin",
+    "roles/compute.securityAdmin",
+    "roles/compute.xpnAdmin",
+    "roles/dns.admin",
+    "roles/networkconnectivity.admin",
+    "roles/servicenetworking.networksAdmin",
+    "roles/serviceusage.serviceUsageConsumer",
+  ]
+
+  # Cross-product of (infra SA, project, role) → one google_project_iam_member per entry.
+  # infra-prod SA → hub + shared-prod
+  # infra-nonprod SA → hub + shared-nonprod
+  infra_sa_grants = merge(
+    { for pair in setproduct(["hub", "shared-prod"], local.infra_network_roles) :
+      "prod-${pair[0]}-${replace(pair[1], "roles/", "")}" => {
+        sa      = "serviceAccount:sa-tf-infra-prod@${local.iac_core_project}.iam.gserviceaccount.com"
+        project = module.project[pair[0]].project_id
+        role    = pair[1]
+      }
+    },
+    { for pair in setproduct(["hub", "shared-nonprod"], local.infra_network_roles) :
+      "nonprod-${pair[0]}-${replace(pair[1], "roles/", "")}" => {
+        sa      = "serviceAccount:sa-tf-infra-nonprod@${local.iac_core_project}.iam.gserviceaccount.com"
+        project = module.project[pair[0]].project_id
+        role    = pair[1]
+      }
+    }
+  )
 }
+
+# ─────────────────────────────────────────────────────────── network projects
 
 module "project" {
   source   = "../../gcp-terraform-module/modules/project"
@@ -93,4 +127,18 @@ module "project" {
     tier        = "network"
     role        = each.value.role
   }
+}
+
+# ─────────────────────── grant infra SAs on their target projects ─────────────
+#
+# sa-tf-infra-prod    → hub + shared-prod   (cross-project, scoped roles only)
+# sa-tf-infra-nonprod → hub + shared-nonprod
+#
+# Hub is shared: both SAs get the same roles there so each can manage its NCC spoke.
+
+resource "google_project_iam_member" "infra_sa" {
+  for_each = local.infra_sa_grants
+  project  = each.value.project
+  role     = each.value.role
+  member   = each.value.sa
 }

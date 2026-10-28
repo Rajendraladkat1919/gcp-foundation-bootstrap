@@ -161,7 +161,9 @@ module "access_logs" {
   }
 }
 
-# bootstrap and lz state buckets share the same config; only name and log prefix differ.
+# bootstrap and lz state buckets share the same config; only name, log prefix, and IAM differ.
+# bootstrap bucket  → sa-tf-bootstrap only (this repo's pipeline)
+# lz bucket         → sa-tf-infra-prod + sa-tf-infra-nonprod (gcp-infrastructure-lz pipeline)
 module "state" {
   source     = "../../gcp-terraform-module/modules/gcs"
   for_each   = local.state_buckets
@@ -189,7 +191,10 @@ module "state" {
     }
   }
   iam = {
-    "roles/storage.objectAdmin" = [module.sa_terraform.iam_email]
+    "roles/storage.objectAdmin" = each.key == "bootstrap" ? [module.sa_tf_bootstrap.iam_email] : [
+      module.sa_tf_infra_prod.iam_email,
+      module.sa_tf_infra_nonprod.iam_email,
+    ]
   }
 }
 
@@ -215,14 +220,22 @@ module "billing_exports" {
 }
 
 # ───────────────────────────────────────────────────────────── service accounts
+#
+# Five scoped Terraform executor SAs — all live in pr-iac-core.
+# WIF bindings (below) enforce which GitHub repo + environment may impersonate each SA.
+#
+#   sa-tf-bootstrap     → gcp-foundation-bootstrap  (this repo, any env)
+#   sa-tf-infra-prod    → gcp-infrastructure-lz     (environment=production only)
+#   sa-tf-infra-nonprod → gcp-infrastructure-lz     (environment=nonprod only)
+#   sa-tf-workload-prod    → gcp-workload            (environment=production only)
+#   sa-tf-workload-nonprod → gcp-workload            (environment=nonprod only)
 
-# Single executor for all stages. Folder roles granted in 1-org; project roles in 4-workload-projects.
-module "sa_terraform" {
+module "sa_tf_bootstrap" {
   source       = "../../gcp-terraform-module/modules/iam-service-account"
   project_id   = module.core_project["iac_core"].project_id
-  name         = module.naming.automation_service_account_ids["execute"]
-  display_name = "Terraform executor"
-  description  = "Runs Terraform for bootstrap, the landing zone and workload projects."
+  name         = "sa-tf-bootstrap"
+  display_name = "Terraform bootstrap executor"
+  description  = "Runs Terraform for all gcp-foundation-bootstrap stages. Org-admin scope."
   iam_organization_roles = {
     (local.organization_id_numeric) = concat(local.org_read_roles, [
       "roles/essentialcontacts.admin",
@@ -253,6 +266,135 @@ module "sa_terraform" {
   }
   iam_billing_roles = {
     (var.billing_account_id) = ["roles/billing.user", "roles/billing.viewer"]
+  }
+}
+
+# Infra SAs: created here with no project roles. Roles on network projects are
+# granted in Stage 2 once those projects exist.
+module "sa_tf_infra_prod" {
+  source       = "../../gcp-terraform-module/modules/iam-service-account"
+  project_id   = module.core_project["iac_core"].project_id
+  name         = "sa-tf-infra-prod"
+  display_name = "Terraform infra executor — prod"
+  description  = "Runs gcp-infrastructure-lz Terraform for production. Scoped to hub + shared-prod projects."
+}
+
+module "sa_tf_infra_nonprod" {
+  source       = "../../gcp-terraform-module/modules/iam-service-account"
+  project_id   = module.core_project["iac_core"].project_id
+  name         = "sa-tf-infra-nonprod"
+  display_name = "Terraform infra executor — nonprod"
+  description  = "Runs gcp-infrastructure-lz Terraform for non-production. Scoped to hub + shared-nonprod projects."
+}
+
+# Workload SAs: created here with no project roles. Roles on workload projects are
+# granted in Stage 4 once those projects exist.
+module "sa_tf_workload_prod" {
+  source       = "../../gcp-terraform-module/modules/iam-service-account"
+  project_id   = module.core_project["iac_core"].project_id
+  name         = "sa-tf-workload-prod"
+  display_name = "Terraform workload executor — prod"
+  description  = "Runs gcp-workload Terraform for production workload projects."
+}
+
+module "sa_tf_workload_nonprod" {
+  source       = "../../gcp-terraform-module/modules/iam-service-account"
+  project_id   = module.core_project["iac_core"].project_id
+  name         = "sa-tf-workload-nonprod"
+  display_name = "Terraform workload executor — nonprod"
+  description  = "Runs gcp-workload Terraform for non-production workload projects."
+}
+
+# ─────────────────────────── WIF pool (moved from deleted Stage 3) ───────────
+
+module "github_wif" {
+  source      = "../../gcp-terraform-module/modules/iam-workload-identity-pool"
+  project_id  = module.core_project["iac_core"].project_id
+  pool_id     = "github"
+  provider_id = "github-actions"
+  display_name = "GitHub Actions OIDC"
+
+  # Map the claims we need for per-SA IAM conditions.
+  attribute_mapping = {
+    "google.subject"        = "assertion.sub"
+    "attribute.repository"  = "assertion.repository"
+    "attribute.environment" = "assertion.environment"
+    "attribute.ref"         = "assertion.ref"
+    "attribute.workflow"    = "assertion.workflow"
+  }
+
+  # Pool-level gate: reject any token not from our GitHub org.
+  attribute_condition = "assertion.repository_owner == '${var.github_org}'"
+}
+
+# ─────────────────────────── per-SA WIF impersonation bindings ───────────────
+#
+# Each binding is authoritative for the workloadIdentityUser role on its SA.
+# Fine-grained conditions (repo + environment) are enforced here, not at the pool level.
+
+# Bootstrap SA: any job in gcp-foundation-bootstrap may impersonate (plan + apply).
+resource "google_service_account_iam_binding" "wif_bootstrap" {
+  service_account_id = module.sa_tf_bootstrap.id
+  role               = "roles/iam.workloadIdentityUser"
+  members = [
+    "principalSet://iam.googleapis.com/${module.github_wif.pool_name}/attribute.repository/${var.github_org}/${var.bootstrap_repository}",
+  ]
+}
+
+# Infra prod SA: only gcp-infrastructure-lz jobs that declare environment=production.
+resource "google_service_account_iam_binding" "wif_infra_prod" {
+  service_account_id = module.sa_tf_infra_prod.id
+  role               = "roles/iam.workloadIdentityUser"
+  members = [
+    "principalSet://iam.googleapis.com/${module.github_wif.pool_name}/attribute.repository/${var.github_org}/${var.infra_lz_repository}",
+  ]
+  condition {
+    title       = "production-env-only"
+    description = "Allows impersonation only from the GitHub 'production' Environment."
+    expression  = "attribute.environment == \"production\""
+  }
+}
+
+# Infra nonprod SA: only gcp-infrastructure-lz jobs that declare environment=nonprod.
+# PR plan jobs must declare environment: nonprod in their workflow to get this token.
+resource "google_service_account_iam_binding" "wif_infra_nonprod" {
+  service_account_id = module.sa_tf_infra_nonprod.id
+  role               = "roles/iam.workloadIdentityUser"
+  members = [
+    "principalSet://iam.googleapis.com/${module.github_wif.pool_name}/attribute.repository/${var.github_org}/${var.infra_lz_repository}",
+  ]
+  condition {
+    title       = "nonprod-env-only"
+    description = "Allows impersonation only from the GitHub 'nonprod' Environment."
+    expression  = "attribute.environment == \"nonprod\""
+  }
+}
+
+# Workload prod SA: only gcp-workload jobs that declare environment=production.
+resource "google_service_account_iam_binding" "wif_workload_prod" {
+  service_account_id = module.sa_tf_workload_prod.id
+  role               = "roles/iam.workloadIdentityUser"
+  members = [
+    "principalSet://iam.googleapis.com/${module.github_wif.pool_name}/attribute.repository/${var.github_org}/${var.workload_repository}",
+  ]
+  condition {
+    title       = "production-env-only"
+    description = "Allows impersonation only from the GitHub 'production' Environment."
+    expression  = "attribute.environment == \"production\""
+  }
+}
+
+# Workload nonprod SA: only gcp-workload jobs that declare environment=nonprod.
+resource "google_service_account_iam_binding" "wif_workload_nonprod" {
+  service_account_id = module.sa_tf_workload_nonprod.id
+  role               = "roles/iam.workloadIdentityUser"
+  members = [
+    "principalSet://iam.googleapis.com/${module.github_wif.pool_name}/attribute.repository/${var.github_org}/${var.workload_repository}",
+  ]
+  condition {
+    title       = "nonprod-env-only"
+    description = "Allows impersonation only from the GitHub 'nonprod' Environment."
+    expression  = "attribute.environment == \"nonprod\""
   }
 }
 
