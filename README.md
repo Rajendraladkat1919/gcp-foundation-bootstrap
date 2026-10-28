@@ -6,13 +6,26 @@ It builds the part of the Google Cloud foundation that everything else stands on
 
 | Stage | Creates | Why it is separate |
 |---|---|---|
-| [`0-core-projects`](0-core-projects/) | Org-root shell projects (`<prefix>-pr-iac-core`, `<prefix>-pr-billing`, `<prefix>-pr-logging`), CMEK key, Terraform state buckets, `dev-terraform-execute`, `sa-billing-reader` and `sa-logging-reader` | These sit on the organization, not in a folder. Everything else depends on them. Applied by hand once, then by CI. |
-| [`1-org`](1-org/) | Folder hierarchy, organization policies, org audit logging and sink, VPC flow-log sink, group access | Highest blast radius, smallest and slowest-changing code. |
-| [`2-network-projects`](2-network-projects/) | Shell only, under Infrastructure / Network: `<prefix>-pr-net-core`, `<prefix>-prod-net-spoke`, `<prefix>-non-prod-net-spoke` | Applied right after the folders. With prefix `demo` the ids are `demo-pr-net-core`, `demo-prod-net-spoke`, `demo-non-prod-net-spoke`. VPCs stay in `gcp-infrastructure-lz`. |
-| [`3-cicd-identity`](3-cicd-identity/) | GitHub OIDC workload identity pool and provider, repository to service account bindings | Controls who can run Terraform at all. Workload repositories and `cicd-runners` may mint a token from the same pool. |
-| [`4-workload-projects`](4-workload-projects/) | One project per YAML file under `4-workload-projects/data/projects/`, with `dev-terraform-execute` granted on that project, a CMEK key and a state bucket | The only stage that changes often. A new project is one reviewed YAML file. |
+| [`0-core-projects`](0-core-projects/) | 3 org-root projects (`pr-iac-core`, `pr-billing`, `pr-logging`), CMEK key, state buckets, **5 scoped Terraform SAs**, GitHub OIDC WIF pool + provider, `sa-billing-reader`, `sa-logging-reader` | These sit on the organization, not in a folder. Identity must exist before anything else runs. Applied by hand once, then by CI. |
+| [`1-org`](1-org/) | Folder hierarchy, 29 organization policies, org audit logging (4 sinks + XSIAM), 10 config-change alerts, 6 custom IAM roles, Okta group bindings | Highest blast radius, smallest and slowest-changing code. |
+| [`2-network-projects`](2-network-projects/) | Three shell projects under `Infrastructure/Network`: `net-core-hub`, `net-shared-prod`, `net-shared-nonprod`. Grants infra SAs on each project. | Applied right after folders. VPCs, firewall, NAT and NCC stay in `gcp-infrastructure-lz`. |
+| [`4-workload-projects`](4-workload-projects/) | One project per YAML file under `data/projects/`, with per-environment workload SA granted, a CMEK key and a state bucket | The only stage that changes often. A new project is one reviewed YAML file. |
 
-Module code comes from `gcp-terraform-module` (vendored Cloud Foundation Fabric **v59.1.0**), pinned by tag.
+Module code comes from `gcp-terraform-module` (Cloud Foundation Fabric **v59.1.0**), pinned by tag.
+
+## Identity architecture
+
+Five service accounts, all in `pr-iac-core`, each scoped to one GitHub repository and one environment. No SA keys — OIDC only. See [ADR 0007](docs/adr/0007-five-scoped-service-accounts.md).
+
+```
+sa-tf-bootstrap       ← gcp-foundation-bootstrap (this repo, any env)
+sa-tf-infra-prod      ← gcp-infrastructure-lz   (environment=production only)
+sa-tf-infra-nonprod   ← gcp-infrastructure-lz   (environment=nonprod only)
+sa-tf-workload-prod   ← gcp-workload             (environment=production only)
+sa-tf-workload-nonprod← gcp-workload             (environment=nonprod only)
+```
+
+A pull request plan job declares `environment: nonprod` in the workflow. The WIF IAM condition enforces that it can only impersonate the nonprod SA — mathematically preventing a PR from obtaining production credentials regardless of workflow logic.
 
 ## How a change flows
 
@@ -25,7 +38,7 @@ main, manual  ─▶ Actions → terraform → apply
 every night   ─▶ drift (opens an issue when Google Cloud differs from main)
 ```
 
-See [docs/architecture.md](docs/architecture.md) for the diagrams and [docs/controls.md](docs/controls.md) for what is enforced and what is not.
+See [docs/architecture.md](docs/architecture.md) for diagrams and [docs/controls.md](docs/controls.md) for what is enforced and what is not.
 
 ## Requirements
 
@@ -43,20 +56,30 @@ See [docs/architecture.md](docs/architecture.md) for the diagrams and [docs/cont
 
 1. Read [docs/runbook-bootstrap.md](docs/runbook-bootstrap.md). The first apply is manual and needs elevated human access once.
 2. `make set-org ORG=<github-org>` replaces the `ORG` placeholder in module sources and CODEOWNERS.
-3. Copy each stage's `terraform.tfvars.example` to `terraform.tfvars` and replace `REPLACE_ME` and `000000000000`. Do not commit `terraform.tfvars`.
+3. Copy each stage's `terraform.tfvars.example` to `terraform.tfvars` and fill in real values. Do not commit `terraform.tfvars`.
 4. `make hooks` before your first commit. Commits that fail the hooks are rejected locally, and CI runs the same hooks.
 5. `make validate` checks every stage offline against a sibling checkout of `gcp-terraform-module`.
 
-## GitHub configuration (set after stage 3 is applied)
+## GitHub configuration (set after Stage 0 is applied)
 
 | Kind | Name | Value |
 |---|---|---|
-| Variable | `WIF_PROVIDER` | Output `workload_identity_provider_name` of stage 3 (`3-cicd-identity`) |
-| Variable | `TF_SA` | Output `automation_service_accounts.execute` of stage 0. Drift, plan and apply use this account |
-| Variable | `TF_STATE_BUCKET` | Output `state_buckets.bootstrap` of stage 0 |
-| Variable (optional) | `RUNNER_LABELS` | JSON list, for example `["self-hosted","cicd-runners"]`. Default `["ubuntu-24.04"]` |
-| Secret | `MODULES_READ_TOKEN` | Read-only credential for `gcp-terraform-module` (GitHub App installation token or fine-grained PAT, `contents: read` on that one repository) |
+| Variable | `WIF_PROVIDER` | Output `wif_provider` of Stage 0 (`0-core-projects`) |
+| Variable | `TF_SA_BOOTSTRAP` | Output `automation_service_accounts.bootstrap` of Stage 0 — used by this repo's pipeline |
+| Variable | `TF_STATE_BUCKET` | Output `state_buckets.bootstrap` of Stage 0 |
+| Variable (optional) | `RUNNER_LABELS` | JSON list, e.g. `["self-hosted","cicd-runners"]`. Default `["ubuntu-24.04"]` |
+| Secret | `MODULES_READ_TOKEN` | Read-only credential for `gcp-terraform-module` (`contents: read` on that repository only) |
+| Environment | `nonprod` | No approval gate. Used by plan and drift jobs. |
 | Environment | `production` | Required reviewers, deployment from `main` only. `make protect` creates it. |
+
+**For other repositories** — set these GitHub variables after Stage 2 and Stage 4 are applied:
+
+| Repo | Variable | Source |
+|---|---|---|
+| `gcp-infrastructure-lz` | `TF_SA` (prod jobs) | Stage 2 output `infra_sa_emails.prod` |
+| `gcp-infrastructure-lz` | `TF_SA` (nonprod jobs) | Stage 2 output `infra_sa_emails.nonprod` |
+| `gcp-workload` | `TF_SA` (prod jobs) | Stage 4 output `projects[*].workload_sa_email` (prod entries) |
+| `gcp-workload` | `TF_SA` (nonprod jobs) | Stage 4 output `projects[*].workload_sa_email` (nonprod entries) |
 
 None of these is a long-lived Google credential. Authentication is OIDC only.
 
@@ -64,12 +87,11 @@ None of these is a long-lived Google credential. Authentication is OIDC only.
 
 ```text
 .github/             workflows, composite action, CODEOWNERS, rulesets, templates, dependabot
-0-core-projects/     stage: core projects, state, CMEK, automation identities
-1-org/               stage: folders, org policy, audit logging, group access
-2-network-projects/  stage: hub and Shared VPC host projects under the Network folder
-3-cicd-identity/     stage: GitHub OIDC
-4-workload-projects/ stage: workload projects from YAML (data/projects/*.yaml)
+0-core-projects/     stage 0: core projects, state, CMEK, 5 Terraform SAs, WIF pool + bindings
+1-org/               stage 1: folders, org policies (29), audit logging, monitoring, custom IAM roles
+2-network-projects/  stage 2: hub + Shared VPC host projects, infra SA grants
+4-workload-projects/ stage 3: workload projects from YAML (data/projects/*.yaml), workload SA grants
 config/stages.txt    apply order, read by the workflows
-docs/                architecture, runbook, controls, ADRs
+docs/                architecture, runbook, controls, ADRs (including ADR 0007 for SA design)
 scripts/             changed-stages, offline validation, branch protection, set-org
 ```

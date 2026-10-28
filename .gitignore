@@ -34,3 +34,10 @@ service-account*.json
 .idea/
 .vscode/
 *.swp
+
+# Architecture diagrams — keep locally, never push to remote
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
