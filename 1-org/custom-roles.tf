@@ -28,7 +28,7 @@ locals {
       description = "Read audit logs and Cloud Logging config. For security operations team."
       permissions = [
         "logging.logEntries.list",
-        "logging.logEntries.listPrivilegedActivity",
+        "logging.privateLogEntries.list",   # correct permission for Data Access audit logs
         "logging.logs.list",
         "logging.buckets.list",
         "logging.buckets.get",

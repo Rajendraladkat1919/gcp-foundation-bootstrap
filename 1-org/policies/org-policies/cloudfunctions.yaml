@@ -11,6 +11,11 @@ cloudfunctions.allowedIngressSettings:
 
 # All Cloud Functions must use a VPC connector to route egress through the VPC.
 # Prevents direct internet egress from function code which bypasses firewall controls.
+#
+# ORDERING NOTE: VPC connectors are created by gcp-infrastructure-lz, which runs after
+# this bootstrap. Cloud Functions cannot be deployed until the LZ creates a connector
+# in the target Shared VPC. Workload teams must wait for the LZ apply before deploying
+# any Cloud Function. This is intentional — all egress must route through the VPC.
 cloudfunctions.requireVPCConnector:
   rules:
     - enforce: true

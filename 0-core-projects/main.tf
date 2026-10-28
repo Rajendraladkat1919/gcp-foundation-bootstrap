@@ -190,11 +190,15 @@ module "state" {
       condition = { days_since_noncurrent_time = 90, with_state = "ARCHIVED" }
     }
   }
-  iam = {
-    "roles/storage.objectAdmin" = each.key == "bootstrap" ? [module.sa_tf_bootstrap.iam_email] : [
-      module.sa_tf_infra_prod.iam_email,
-      module.sa_tf_infra_nonprod.iam_email,
-    ]
+  iam = each.key == "bootstrap" ? {
+    # Only sa-tf-bootstrap writes bootstrap state.
+    # Infra SAs get objectViewer so gcp-infrastructure-lz can read workload project outputs
+    # published at bootstrap/3-workload-projects (e.g. project IDs for Shared VPC attachment).
+    "roles/storage.objectAdmin"  = [module.sa_tf_bootstrap.iam_email]
+    "roles/storage.objectViewer" = [module.sa_tf_infra_prod.iam_email, module.sa_tf_infra_nonprod.iam_email]
+  } : {
+    # Infra SAs own the lz bucket — they read and write their own state.
+    "roles/storage.objectAdmin" = [module.sa_tf_infra_prod.iam_email, module.sa_tf_infra_nonprod.iam_email]
   }
 }
 
@@ -260,6 +264,7 @@ module "sa_tf_bootstrap" {
     (module.core_project["billing"].project_id) = ["roles/bigquery.admin"]
     (module.core_project["logging"].project_id) = [
       "roles/logging.admin",
+      "roles/monitoring.admin",   # required: Stage 1 creates log-based metrics + alert policies here
       "roles/resourcemanager.projectIamAdmin",
       "roles/storage.admin",
     ]
@@ -315,6 +320,10 @@ module "github_wif" {
   display_name = "GitHub Actions OIDC"
 
   # Map the claims we need for per-SA IAM conditions.
+  # VERIFY: confirm the CFF iam-workload-identity-pool module accepts attribute_mapping.
+  # If it does not, replace this module with direct google_iam_workload_identity_pool +
+  # google_iam_workload_identity_pool_provider resources where attribute_mapping is native.
+  # attribute.environment MUST be mapped — all infra and workload SA conditions depend on it.
   attribute_mapping = {
     "google.subject"        = "assertion.sub"
     "attribute.repository"  = "assertion.repository"

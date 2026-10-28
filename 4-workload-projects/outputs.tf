@@ -9,8 +9,15 @@ output "projects" {
       repository     = v.repository
       state_bucket   = module.state[k].name
       kms_key_id     = module.kms[k].keys["tfstate"].id
-      # SA to use in gcp-workload GitHub Actions workflow for this project's environment.
+      # SA that gcp-workload uses in its GitHub Actions workflow for this environment.
       workload_sa_email = (
+        v.environment == "prod"
+        ? data.terraform_remote_state.org.outputs.sa_emails.workload_prod
+        : data.terraform_remote_state.org.outputs.sa_emails.workload_nonprod
+      )
+      # terraform_executor_email is the same value under the name gcp-infrastructure-lz reads
+      # to grant compute.networkUser on Shared VPC subnets to the workload deployer SA.
+      terraform_executor_email = (
         v.environment == "prod"
         ? data.terraform_remote_state.org.outputs.sa_emails.workload_prod
         : data.terraform_remote_state.org.outputs.sa_emails.workload_nonprod

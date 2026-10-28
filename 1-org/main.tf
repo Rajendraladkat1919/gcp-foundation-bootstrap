@@ -8,7 +8,10 @@ locals {
   org_id_numeric         = trimprefix(var.organization_id, "organizations/")
   iac_core_project       = module.naming.core_project_ids["iac_core"]
   # sa-tf-bootstrap owns all bootstrap stages; explicit email avoids naming-module coupling.
-  terraform_executor     = "serviceAccount:sa-tf-bootstrap@${local.iac_core_project}.iam.gserviceaccount.com"
+  terraform_executor  = "serviceAccount:sa-tf-bootstrap@${local.iac_core_project}.iam.gserviceaccount.com"
+  # Infra SAs need compute.xpnAdmin on workload env folders to attach service projects to Shared VPC.
+  infra_prod_sa       = "serviceAccount:sa-tf-infra-prod@${local.iac_core_project}.iam.gserviceaccount.com"
+  infra_nonprod_sa    = "serviceAccount:sa-tf-infra-nonprod@${local.iac_core_project}.iam.gserviceaccount.com"
   logging_project        = module.naming.core_project_ids["logging"]
   xsiam_topic_resource   = "pubsub.googleapis.com/projects/${local.iac_core_project}/topics/${var.prefix}-pr-xsiam"
   prisma_cloud_sa_member = "serviceAccount:sa-prisma-cloud@${local.iac_core_project}.iam.gserviceaccount.com"
@@ -234,6 +237,14 @@ module "folder_business_unit_environments" {
   parent              = module.folder_business_units[each.value.business_unit].id
   name                = each.value.folder_name
   deletion_protection = !var.allow_destroy
+  # Grant the environment-matched infra SA compute.xpnAdmin so it can attach workload projects
+  # as Shared VPC service projects (required on both the host project and the service project).
+  iam_bindings_additive = {
+    infra_sa_xpn_admin = {
+      member = each.value.environment == "prod" ? local.infra_prod_sa : local.infra_nonprod_sa
+      role   = "roles/compute.xpnAdmin"
+    }
+  }
 }
 
 # ───────────────────────────────────────────────────────────── XSIAM log sink
