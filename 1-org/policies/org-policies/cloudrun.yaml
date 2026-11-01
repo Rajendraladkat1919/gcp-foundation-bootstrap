@@ -7,5 +7,5 @@ run.allowedIngress:
   rules:
     - allow:
         values:
-          - INGRESS_TRAFFIC_INTERNAL_ONLY
-          - INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER
+          - internal
+          - internal-and-cloud-load-balancing

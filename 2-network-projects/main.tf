@@ -1,7 +1,7 @@
 data "terraform_remote_state" "org" {
   backend = "gcs"
   config = {
-    bucket = "${var.prefix}-terraform-state-foundation"
+    bucket = var.org_state_bucket
     prefix = "bootstrap/1-org"
   }
 }
@@ -36,8 +36,9 @@ locals {
   ]
 
   # Extra APIs only needed on the hub (on-prem data-center connectivity).
+  # interconnect.googleapis.com is omitted: this organization returned 403
+  # SERVICE_CONFIG_NOT_FOUND when enabling it.
   hub_extra_apis = [
-    "interconnect.googleapis.com",    # Dedicated/Partner Interconnect to on-prem DC
     "networksecurity.googleapis.com", # Cloud Armor / firewall-plus policies
     "privateca.googleapis.com",       # Private CA for mTLS to on-prem
     "vpcaccess.googleapis.com",       # Serverless VPC Access (Cloud Run → VPC)

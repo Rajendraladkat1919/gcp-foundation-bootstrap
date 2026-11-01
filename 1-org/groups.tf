@@ -1,15 +1,12 @@
-# Cloud Identity groups managed by Terraform.
-# platform-tf-admin-sa needs roles/cloudidentity.groupAdmin (granted in Stage 0).
-#
-# Group naming convention: grp-{purpose}@{domain}
-# All groups are security groups (discussion_forum label) for use in GCP IAM.
-#
-# Once created, each group email is referenced in terraform.tfvars under the
-# matching var.groups field so Stage 1 IAM bindings activate automatically on re-apply.
+# Kept commented. rala@ cannot call groups.create (Cloud Identity error 2015).
+# A previous apply destroyed grp-billing-viewers and failed to recreate it.
+# Leave this commented. Groups come from the console or Okta SCIM.
+# Organization IAM uses the emails in terraform.tfvars, not these resources.
 
+/*
 locals {
-  group_parent  = "customers/${var.directory_customer_id}"
-  group_labels  = { "cloudidentity.googleapis.com/groups.security" = "" }
+  group_parent = "customers/${var.directory_customer_id}"
+  group_labels = { "cloudidentity.googleapis.com/groups.discussion_forum" = "" }
 }
 
 resource "google_cloud_identity_group" "audit_viewers" {
@@ -76,3 +73,4 @@ resource "google_cloud_identity_group" "break_glass" {
 
   labels = local.group_labels
 }
+*/

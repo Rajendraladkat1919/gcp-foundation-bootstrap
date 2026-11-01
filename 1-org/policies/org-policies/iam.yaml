@@ -21,8 +21,5 @@ iam.disableWorkloadIdentityClusterCreation:
   rules:
     - enforce: true
 
-# Prevent any principal from exempting themselves from audit logging.
-# Without this an admin can add a data-access audit exemption and hide API calls.
-iam.disableAuditLoggingExemptions:
-  rules:
-    - enforce: true
+# iam.disableAuditLoggingExemptions is not a constraint on this organization.
+# Creating it returned 404, so it is omitted.

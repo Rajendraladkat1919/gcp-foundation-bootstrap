@@ -9,7 +9,9 @@ region          = "us-west2"
 # ── Groups (Okta SCIM provisioned into Cloud Identity) ────────────────────────
 # Only platform_engineers is required. Add the others once the groups exist.
 groups = {
-  platform_engineers = "platform-engineers@example.com"
+  platform_engineers       = "platform-engineers@example.com"
+  business_unit_commercial = "" # e.g. "business-unit-commercial@example.com"
+  developers               = "" # e.g. "grp-developer@example.com"
 
   # Optional — leave as "" to skip the IAM binding for that group.
   audit_viewers      = ""   # e.g. "audit-viewers@example.com"

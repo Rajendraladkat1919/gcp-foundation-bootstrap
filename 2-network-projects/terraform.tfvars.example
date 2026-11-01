@@ -2,3 +2,4 @@
 prefix             = "demo"
 billing_account_id = "000000-000000-000000"
 cost_center        = "platform"
+org_state_bucket   = "demo-pr-tfstate-bootstrap"

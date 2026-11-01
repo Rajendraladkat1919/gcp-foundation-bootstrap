@@ -88,6 +88,18 @@ locals {
     var.groups.break_glass != "" ? {
       "group:${var.groups.break_glass}" = ["roles/resourcemanager.organizationViewer"]
     } : {},
+    var.groups.business_unit_commercial != "" ? {
+      "group:${var.groups.business_unit_commercial}" = [
+        "roles/resourcemanager.folderViewer",
+        "roles/resourcemanager.organizationViewer",
+      ]
+    } : {},
+    var.groups.developers != "" ? {
+      "group:${var.groups.developers}" = [
+        "roles/resourcemanager.folderViewer",
+        "roles/resourcemanager.organizationViewer",
+      ]
+    } : {},
   )
 }
 

@@ -23,3 +23,8 @@ variable "prefix" {
   description = "Short organization prefix used in every project id and bucket name."
   type        = string
 }
+
+variable "org_state_bucket" {
+  description = "GCS bucket that holds Stage 1 state at prefix bootstrap/1-org."
+  type        = string
+}

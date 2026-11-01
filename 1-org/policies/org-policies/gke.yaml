@@ -1,19 +1,6 @@
----
 # GKE organization policies.
-# The diagram shows GKE self-hosted Actions runners (private cluster, auto-scaling).
-# These policies harden all GKE clusters across the org.
-
-# Disable legacy ABAC — always use RBAC.
-container.disableLegacyAbac:
-  rules:
-    - enforce: true
-
-# Require shielded GKE nodes (Secure Boot + vTPM + Integrity Monitoring).
-container.requireShieldedNodes:
-  rules:
-    - enforce: true
-
-# Prevent automatic creation of the default GKE service account per cluster.
-container.disableDefaultServiceAccountCreation:
-  rules:
-    - enforce: true
+# These constraints returned 404 on this organization, so they are omitted:
+# container.disableLegacyAbac
+# container.requireShieldedNodes
+# container.disableDefaultServiceAccountCreation
+{}

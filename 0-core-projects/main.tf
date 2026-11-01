@@ -94,11 +94,13 @@ locals {
   #   network    → gcp-infrastructure-lz (hub + spoke VPCs)
   state_buckets = {
     bootstrap = {
-      bucket_name = "${var.prefix}-terraform-state-foundation"
+      # GCS module prepends var.prefix automatically → final bucket ID: {prefix}-terraform-state-foundation
+      bucket_name = "terraform-state-foundation"
       log_prefix  = "terraform-state-foundation"
     }
     lz = {
-      bucket_name = "${var.prefix}-terraform-state-network"
+      # GCS module prepends var.prefix automatically → final bucket ID: {prefix}-terraform-state-network
+      bucket_name = "terraform-state-network"
       log_prefix  = "terraform-state-network"
     }
   }
@@ -240,7 +242,7 @@ module "state" {
     # published at bootstrap/3-workload-projects (e.g. project IDs for Shared VPC attachment).
     "roles/storage.objectAdmin"  = [module.sa_tf_bootstrap.iam_email]
     "roles/storage.objectViewer" = [module.sa_tf_infra.iam_email]
-  } : {
+    } : {
     # network-tf-infra-sa owns the lz bucket — reads and writes its own state.
     "roles/storage.objectAdmin" = [module.sa_tf_infra.iam_email]
   }
@@ -284,7 +286,7 @@ module "sa_tf_bootstrap" {
   description  = "Runs Terraform for all gcp-foundation-bootstrap stages. Org-admin scope."
   iam_organization_roles = {
     (local.organization_id_numeric) = concat(local.org_read_roles, [
-      "roles/cloudidentity.groupAdmin",   # create and manage Cloud Identity groups in Stage 1
+      "roles/cloudidentity.groupsAdmin", # create and manage Cloud Identity groups in Stage 1
       "roles/essentialcontacts.admin",
       "roles/logging.configWriter",
       "roles/orgpolicy.policyAdmin",
@@ -307,7 +309,7 @@ module "sa_tf_bootstrap" {
     (module.core_project["billing"].project_id) = ["roles/bigquery.admin"]
     (module.core_project["logging"].project_id) = [
       "roles/logging.admin",
-      "roles/monitoring.admin",   # required: Stage 1 creates log-based metrics + alert policies here
+      "roles/monitoring.admin", # required: Stage 1 creates log-based metrics + alert policies here
       "roles/resourcemanager.projectIamAdmin",
       "roles/storage.admin",
     ]
@@ -357,14 +359,16 @@ resource "google_iam_workload_identity_pool_provider" "github_actions" {
   workload_identity_pool_provider_id = "github-actions"
   display_name                       = "GitHub Actions"
 
-  # Map JWT claims → GCP attributes. attribute.environment MUST be mapped —
-  # all infra and workload SA IAM conditions depend on it.
+  # Map JWT claims → GCP attributes. repository_env is org/repo/environment so a
+  # principalSet can select both. Service-account IAM conditions cannot see
+  # attribute.*; that CEL context rejects attribute.environment as undeclared.
   attribute_mapping = {
-    "google.subject"        = "assertion.sub"
-    "attribute.repository"  = "assertion.repository"
-    "attribute.environment" = "assertion.environment"
-    "attribute.ref"         = "assertion.ref"
-    "attribute.workflow"    = "assertion.workflow"
+    "google.subject"           = "assertion.sub"
+    "attribute.repository"     = "assertion.repository"
+    "attribute.environment"    = "assertion.environment"
+    "attribute.repository_env" = "assertion.repository + \"/\" + assertion.environment"
+    "attribute.ref"            = "assertion.ref"
+    "attribute.workflow"       = "assertion.workflow"
   }
 
   # Pool-level gate: reject any token not from our GitHub org.
@@ -378,7 +382,7 @@ resource "google_iam_workload_identity_pool_provider" "github_actions" {
 # ─────────────────────────── per-SA WIF impersonation bindings ───────────────
 #
 # Each binding is authoritative for the workloadIdentityUser role on its SA.
-# Fine-grained conditions (repo + environment) are enforced here, not at the pool level.
+# Repo and environment are selected by the principalSet, not by an IAM condition.
 
 # Bootstrap SA: any job in gcp-foundation-bootstrap may impersonate (plan + apply).
 resource "google_service_account_iam_binding" "wif_bootstrap" {
@@ -402,18 +406,16 @@ resource "google_service_account_iam_binding" "wif_infra" {
 
 # Workload SAs: one binding per YAML file. Each SA is bound to exactly one repo
 # and one GitHub Environment — no cross-repo or cross-environment impersonation.
+# GitHub's assertion.repository is already "org/repo", so repository_env is
+# "org/repo/environment".
 resource "google_service_account_iam_binding" "wif_workload" {
   for_each           = local.workload_sa_map
   service_account_id = module.sa_workload[each.key].id
   role               = "roles/iam.workloadIdentityUser"
+  depends_on         = [google_iam_workload_identity_pool_provider.github_actions]
   members = [
-    "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${var.github_org}/${each.value.repository}",
+    "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository_env/${var.github_org}/${each.value.repository}/${each.value.github_env}",
   ]
-  condition {
-    title       = "${each.key}-env-gate"
-    description = "Only the '${each.value.github_env}' GitHub Environment of ${each.value.repository} may impersonate this SA."
-    expression  = "attribute.environment == \"${each.value.github_env}\""
-  }
 }
 
 module "sa_billing_reader" {

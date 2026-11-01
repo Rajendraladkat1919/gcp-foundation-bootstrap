@@ -118,7 +118,7 @@ resource "google_monitoring_alert_policy" "security" {
   conditions {
     display_name = "${each.value.display_name} detected"
     condition_threshold {
-      filter          = "resource.type=\"global\" AND metric.type=\"logging.googleapis.com/user/${google_logging_metric.security[each.key].name}\""
+      filter          = "resource.type=\"logging_bucket\" AND metric.type=\"logging.googleapis.com/user/${google_logging_metric.security[each.key].name}\""
       comparison      = "COMPARISON_GT"
       threshold_value = 0
       duration        = local.alert_duration

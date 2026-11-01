@@ -47,12 +47,14 @@ variable "groups" {
   description = "Okta-provisioned Google groups in Cloud Identity. All fields are optional — leave as empty string to skip the IAM binding. Groups do not need to exist before the first apply; add emails once Okta SCIM has provisioned the groups and re-apply Stage 1."
   type = object({
     # All fields are optional so deployment can proceed before any groups are created.
-    platform_engineers = optional(string, "")
-    audit_viewers      = optional(string, "")
-    billing_viewers    = optional(string, "")
-    network_viewers    = optional(string, "")
-    security_reviewers = optional(string, "")
-    break_glass        = optional(string, "")
+    platform_engineers       = optional(string, "")
+    business_unit_commercial = optional(string, "")
+    developers               = optional(string, "")
+    audit_viewers            = optional(string, "")
+    billing_viewers          = optional(string, "")
+    network_viewers          = optional(string, "")
+    security_reviewers       = optional(string, "")
+    break_glass              = optional(string, "")
   })
   default = {}
 }

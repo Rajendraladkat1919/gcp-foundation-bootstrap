@@ -43,29 +43,44 @@ output "state_buckets" {
 
 output "lz_state_config" {
   description = <<-EOT
-    Everything gcp-infrastructure-lz needs to configure its Terraform backends.
+    Everything gcp-infrastructure-lz needs to configure its GitHub Actions variables.
 
-    Set TF_STATE_BUCKET = state_bucket in the gcp-infrastructure-lz GitHub repo.
-    Each module inside that repo must use one of the prefixes below in its backend "gcs" block.
+    Required variables in the gcp-infrastructure-lz GitHub repo (Settings → Secrets and variables → Actions → Variables):
 
-    hub/backend.tf          → prefix = "lz/hub"
-    spoke-prod/backend.tf   → prefix = "lz/spoke-prod"
-    spoke-nonprod/backend.tf→ prefix = "lz/spoke-nonprod"
+      TF_STATE_BUCKET           = state_bucket          (lz state bucket; also used as TF_VAR_lz_state_bucket in spoke stages)
+      TF_BOOTSTRAP_STATE_BUCKET = bootstrap_state_bucket (read by spoke stages for workload project outputs)
+      TF_IAC_PROJECT_ID         = core_projects.iac_core (billing project for all Terraform API calls)
+      TF_SA                     = sa_email              (set by 0-core-projects: automation_service_accounts.infra)
+      WIF_PROVIDER              = set by 0-core-projects: wif_provider output
 
-    The hub prefix is always production-gated because hub changes affect both spokes.
+    Network project IDs (set from: terraform -chdir=2-network-projects output projects):
+      TF_HUB_PROJECT_ID           = projects["hub"].project_id
+      TF_SPOKE_PROJECT_ID_PROD    = projects["shared-prod"].project_id
+      TF_SPOKE_PROJECT_ID_NONPROD = projects["shared-nonprod"].project_id
+
+    Each stage backend "gcs" block uses one of the prefixes below, all in TF_STATE_BUCKET:
+      net-core-hub/backend.tf       → prefix = "terraform/state/net-core-hub"
+      net-shared-prod/backend.tf    → prefix = "terraform/state/net-shared-prod"
+      net-shared-non-prod/backend.tf→ prefix = "terraform/state/net-shared-non-prod"
+
+    GitHub Actions environment gates (Settings → Environments):
+      net-core-hub    → production  (hub changes affect both spokes; always production-gated)
+      net-shared-prod → production
+      net-shared-non-prod → nonprod (can deploy without production approval)
   EOT
   value = {
-    state_bucket = module.state["lz"].name
-    sa_email     = module.sa_tf_infra.email
+    state_bucket           = module.state["lz"].name
+    bootstrap_state_bucket = module.state["bootstrap"].name
+    sa_email               = module.sa_tf_infra.email
     prefixes = {
-      hub           = "lz/hub"
-      spoke_prod    = "lz/spoke-prod"
-      spoke_nonprod = "lz/spoke-nonprod"
+      net_core_hub       = "terraform/state/net-core-hub"
+      net_shared_prod    = "terraform/state/net-shared-prod"
+      net_shared_nonprod = "terraform/state/net-shared-non-prod"
     }
     pipeline_environments = {
-      hub           = "production"
-      spoke_prod    = "production"
-      spoke_nonprod = "nonprod"
+      net_core_hub       = "production"
+      net_shared_prod    = "production"
+      net_shared_nonprod = "nonprod"
     }
   }
 }

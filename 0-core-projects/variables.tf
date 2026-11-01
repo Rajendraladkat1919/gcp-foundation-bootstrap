@@ -57,7 +57,7 @@ variable "region" {
 }
 
 variable "state_location" {
-  description = "GCS location for Terraform state buckets. Defaults to US multi-region for resilience across regional outages. The KMS key (var.region) must be within this multi-region. US covers all us-* regions."
+  description = "GCS location for Terraform state buckets. Must be the same location as the CMEK key (var.region). A US multi-region bucket cannot use a regional key such as us-west2."
   type        = string
   default     = "US"
 }
