@@ -2,8 +2,8 @@
 
 One project per YAML file under `data/projects/`. Each project gets baseline APIs, a Cloud KMS key, and a CMEK-encrypted state bucket. Two SAs are granted per project:
 
-- `sa-tf-bootstrap` — project lifecycle only (`projectIamAdmin`, `serviceUsageAdmin`). Cannot deploy app resources.
-- `sa-tf-workload-prod` or `sa-tf-workload-nonprod` — full deployer (`editor`, `projectIamAdmin`, `secretmanager.admin`, `serviceAccountAdmin`). Matched by the `environment` field in the YAML.
+- `platform-tf-admin-sa` — project lifecycle only (`projectIamAdmin`, `serviceUsageAdmin`). Cannot deploy app resources.
+- `workload-tf-prod-sa` or `workload-tf-nonprod-sa` — full deployer (`editor`, `projectIamAdmin`, `secretmanager.admin`, `serviceAccountAdmin`). Matched by the `environment` field in the YAML.
 
 Both SA emails are read from Stage 1 remote state. Adding a new project requires only a new reviewed YAML file — no Terraform code changes.
 

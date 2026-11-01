@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Replaces the ORG placeholder (GitHub organization) in module sources, CODEOWNERS and docs.
+# Replaces the ORG placeholder in CODEOWNERS and workflow files with the actual
+# GitHub organisation name. Modules now source directly from the public CFF repo
+# so there are no module-source placeholders to replace.
 # Usage: scripts/set-org.sh <github-org>
 set -euo pipefail
 
@@ -11,6 +13,6 @@ fi
 
 root="$(git rev-parse --show-toplevel)"
 cd "$root"
-git ls-files -z -- '*.tf' '*.md' '*.yml' '*.yaml' 'CODEOWNERS' '.github/CODEOWNERS' |
-  xargs -0 perl -pi -e "s#github\\.com/ORG/#github.com/${org}/#g; s#\\@ORG/#\\@${org}/#g"
-echo "Replaced ORG with ${org}. Review with: git diff"
+git ls-files -z -- '*.md' '*.yml' '*.yaml' 'CODEOWNERS' '.github/CODEOWNERS' |
+  xargs -0 perl -pi -e "s#\\@ORG/#\\@${org}/#g"
+echo "Replaced ORG with ${org} in CODEOWNERS and docs. Review with: git diff"

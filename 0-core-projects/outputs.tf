@@ -4,19 +4,21 @@ output "access_log_bucket" {
 }
 
 output "automation_service_accounts" {
-  description = "Terraform executor SA emails. Set these as GitHub Actions variables in each repo."
+  description = "Terraform executor SA emails. Set bootstrap and infra as GitHub Actions variables. Workload SA emails are per-YAML — see workload_sa_emails output."
   value = {
-    bootstrap      = module.sa_tf_bootstrap.email       # TF_SA_BOOTSTRAP in gcp-foundation-bootstrap
-    infra_prod     = module.sa_tf_infra_prod.email      # TF_SA in gcp-infrastructure-lz (prod env)
-    infra_nonprod  = module.sa_tf_infra_nonprod.email   # TF_SA in gcp-infrastructure-lz (nonprod env)
-    workload_prod  = module.sa_tf_workload_prod.email   # TF_SA in gcp-workload (prod env)
-    workload_nonprod = module.sa_tf_workload_nonprod.email # TF_SA in gcp-workload (nonprod env)
+    bootstrap = module.sa_tf_bootstrap.email # TF_SA_BOOTSTRAP in gcp-foundation-bootstrap
+    infra     = module.sa_tf_infra.email     # TF_SA in gcp-infrastructure-lz (all envs)
   }
+}
+
+output "workload_sa_emails" {
+  description = "Workload executor SA emails keyed by YAML filename. Each entry is the TF_SA for the repo named in that YAML file. Stage 4 outputs.projects also exposes the email per project."
+  value       = { for k, v in module.sa_workload : k => v.email }
 }
 
 output "wif_provider" {
   description = "WIF provider resource name. Set as WIF_PROVIDER in every GitHub repo that authenticates to GCP."
-  value       = module.github_wif.provider_name
+  value       = google_iam_workload_identity_pool_provider.github_actions.name
 }
 
 output "core_project_numbers" {
@@ -37,6 +39,35 @@ output "kms_state_key_id" {
 output "state_buckets" {
   description = "Terraform state bucket names, keyed by bootstrap and lz."
   value       = { for k, v in module.state : k => v.name }
+}
+
+output "lz_state_config" {
+  description = <<-EOT
+    Everything gcp-infrastructure-lz needs to configure its Terraform backends.
+
+    Set TF_STATE_BUCKET = state_bucket in the gcp-infrastructure-lz GitHub repo.
+    Each module inside that repo must use one of the prefixes below in its backend "gcs" block.
+
+    hub/backend.tf          → prefix = "lz/hub"
+    spoke-prod/backend.tf   → prefix = "lz/spoke-prod"
+    spoke-nonprod/backend.tf→ prefix = "lz/spoke-nonprod"
+
+    The hub prefix is always production-gated because hub changes affect both spokes.
+  EOT
+  value = {
+    state_bucket = module.state["lz"].name
+    sa_email     = module.sa_tf_infra.email
+    prefixes = {
+      hub           = "lz/hub"
+      spoke_prod    = "lz/spoke-prod"
+      spoke_nonprod = "lz/spoke-nonprod"
+    }
+    pipeline_environments = {
+      hub           = "production"
+      spoke_prod    = "production"
+      spoke_nonprod = "nonprod"
+    }
+  }
 }
 
 output "billing_export_dataset" {

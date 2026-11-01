@@ -50,11 +50,11 @@ Creates the org-root shell projects, CMEK state encryption, Terraform state buck
 | google\_kms\_crypto\_key\_iam\_member.gcs\_agent | resource | Grants the GCS service agent encrypt/decrypt on the tfstate key |
 | google\_bigquery\_dataset.billing\_export | resource | BQ dataset for Cloud Billing detailed and standard export |
 | google\_pubsub\_topic.xsiam | resource | Pub/Sub topic for XSIAM SIEM. Stage 1 log sinks write here. 7-day message retention |
-| google\_service\_account\_iam\_binding.wif\_bootstrap | resource | Authoritative WIF binding — `gcp-foundation-bootstrap` repo → `sa-tf-bootstrap` |
-| google\_service\_account\_iam\_binding.wif\_infra\_prod | resource | Authoritative WIF binding — infra-lz repo + env=production → `sa-tf-infra-prod` |
-| google\_service\_account\_iam\_binding.wif\_infra\_nonprod | resource | Authoritative WIF binding — infra-lz repo + env=nonprod → `sa-tf-infra-nonprod` |
-| google\_service\_account\_iam\_binding.wif\_workload\_prod | resource | Authoritative WIF binding — workload repo + env=production → `sa-tf-workload-prod` |
-| google\_service\_account\_iam\_binding.wif\_workload\_nonprod | resource | Authoritative WIF binding — workload repo + env=nonprod → `sa-tf-workload-nonprod` |
+| google\_service\_account\_iam\_binding.wif\_bootstrap | resource | Authoritative WIF binding — `gcp-foundation-bootstrap` repo → `platform-tf-admin-sa` |
+| google\_service\_account\_iam\_binding.wif\_infra\_prod | resource | Authoritative WIF binding — infra-lz repo + env=production → `network-tf-infra-sa-prod` |
+| google\_service\_account\_iam\_binding.wif\_infra\_nonprod | resource | Authoritative WIF binding — infra-lz repo + env=nonprod → `network-tf-infra-sa-nonprod` |
+| google\_service\_account\_iam\_binding.wif\_workload\_prod | resource | Authoritative WIF binding — workload repo + env=production → `workload-tf-prod-sa` |
+| google\_service\_account\_iam\_binding.wif\_workload\_nonprod | resource | Authoritative WIF binding — workload repo + env=nonprod → `workload-tf-nonprod-sa` |
 
 ## Inputs
 
@@ -66,13 +66,13 @@ Creates the org-root shell projects, CMEK state encryption, Terraform state buck
 | cost\_center | Cost center label applied to every resource this stage creates | `string` | n/a | yes |
 | region | Region for state buckets, KMS keyring and access log bucket | `string` | n/a | yes |
 | github\_org | GitHub organisation name (slug only, not a URL). Used in WIF pool condition and SA binding conditions | `string` | n/a | yes |
-| bootstrap\_repository | GitHub repo for `gcp-foundation-bootstrap`. Only this repo may impersonate `sa-tf-bootstrap` | `string` | `"gcp-foundation-bootstrap"` | no |
-| infra\_lz\_repository | GitHub repo for `gcp-infrastructure-lz`. `sa-tf-infra-prod/nonprod` are scoped to this repo | `string` | `"gcp-infrastructure-lz"` | no |
-| workload\_repository | GitHub repo for `gcp-workload`. `sa-tf-workload-prod/nonprod` are scoped to this repo | `string` | `"gcp-workload"` | no |
+| bootstrap\_repository | GitHub repo for `gcp-foundation-bootstrap`. Only this repo may impersonate `platform-tf-admin-sa` | `string` | `"gcp-foundation-bootstrap"` | no |
+| infra\_lz\_repository | GitHub repo for `gcp-infrastructure-lz`. `network-tf-infra-sa-prod/nonprod` are scoped to this repo | `string` | `"gcp-infrastructure-lz"` | no |
+| workload\_repository | GitHub repo for `gcp-workload`. `workload-tf-prod-sa/nonprod` are scoped to this repo | `string` | `"gcp-workload"` | no |
 | access\_log\_retention\_days | Retention in days for the GCS access log bucket | `number` | `400` | no |
 | lock\_log\_retention | Lock the access log bucket retention policy. Irreversible | `bool` | `false` | no |
 | allow\_destroy | Lift deletion protection. Use `-var allow_destroy=true` before destroy | `bool` | `false` | no |
-| enable\_prisma\_cloud | Create `sa-prisma-cloud` with org read-only access for Prisma Cloud CSPM | `bool` | `false` | no |
+| enable\_prisma\_cloud | Create `prisma-cloud-sa` with org read-only access for Prisma Cloud CSPM | `bool` | `false` | no |
 | enable\_scc | Enable Security Command Center resources. Requires SCC Premium activated manually first | `bool` | `false` | no |
 | security\_contact\_email | Email for Essential Contacts security category and SCC findings. Leave empty to skip | `string` | `""` | no |
 

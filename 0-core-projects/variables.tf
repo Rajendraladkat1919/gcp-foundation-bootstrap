@@ -52,12 +52,18 @@ variable "prefix" {
 }
 
 variable "region" {
-  description = "Region for state buckets, the KMS key ring and the access log bucket. Must be allowed by the location org policy."
+  description = "Region for the KMS keyring, access log bucket, and billing export bucket. Must be allowed by the location org policy."
   type        = string
 }
 
+variable "state_location" {
+  description = "GCS location for Terraform state buckets. Defaults to US multi-region for resilience across regional outages. The KMS key (var.region) must be within this multi-region. US covers all us-* regions."
+  type        = string
+  default     = "US"
+}
+
 variable "enable_prisma_cloud" {
-  description = "Create the sa-prisma-cloud service account with org-level read-only access for Prisma Cloud CSPM connector. The SA email is emitted as an output to configure in the Prisma Cloud console."
+  description = "Create the prisma-cloud-sa service account with org-level read-only access for Prisma Cloud CSPM connector. The SA email is emitted as an output to configure in the Prisma Cloud console."
   type        = bool
   default     = false
 }
@@ -82,19 +88,16 @@ variable "github_org" {
 }
 
 variable "bootstrap_repository" {
-  description = "GitHub repository that runs this bootstrap. Only this repo may impersonate sa-tf-bootstrap."
+  description = "GitHub repository that runs this bootstrap. Only this repo may impersonate platform-tf-admin-sa."
   type        = string
   default     = "gcp-foundation-bootstrap"
 }
 
 variable "infra_lz_repository" {
-  description = "GitHub repository for the landing-zone network infrastructure. sa-tf-infra-prod and sa-tf-infra-nonprod are scoped to this repo."
+  description = "GitHub repository for the landing-zone network infrastructure. network-tf-infra-sa is scoped to this repo (all environments)."
   type        = string
   default     = "gcp-infrastructure-lz"
 }
 
-variable "workload_repository" {
-  description = "GitHub repository for application workloads. sa-tf-workload-prod and sa-tf-workload-nonprod are scoped to this repo."
-  type        = string
-  default     = "gcp-workload"
-}
+# workload_repository removed — workload repos are discovered from
+# 4-workload-projects/data/projects/*.yaml (repository field per YAML file).

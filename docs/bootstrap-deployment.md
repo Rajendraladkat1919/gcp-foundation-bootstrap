@@ -104,7 +104,7 @@ Groups that must exist before stage 1:
 
 These stay after the human's temporary roles are removed.
 
-The first apply created `sa-tf-bootstrap-plan`, `sa-tf-bootstrap-apply`, `sa-tf-lz-plan`, `sa-tf-lz-apply`, and `sa-wlp-deployer` plus `sa-wlp-planner` in each workload project. The current code replaces those with `dev-terraform-execute` on the next apply of stages 0, 1, 3 and 4. `sa-billing-reader` and `sa-logging-reader` stay.
+The first apply created `platform-tf-admin-sa-plan`, `platform-tf-admin-sa-apply`, `sa-tf-lz-plan`, `sa-tf-lz-apply`, and `sa-wlp-deployer` plus `sa-wlp-planner` in each workload project. The current code replaces those with `dev-terraform-execute` on the next apply of stages 0, 1, 3 and 4. `billing-reader-sa` and `logging-reader-sa` stay.
 
 ### Terraform executor service accounts in `demo-pr-iac-core`
 
@@ -112,11 +112,11 @@ See ADR 0007 for the full rationale. All five SAs live in `pr-iac-core`. Permiss
 
 | Account | Bound repository | Org / cross-project roles |
 |---|---|---|
-| `sa-tf-bootstrap` | `gcp-foundation-bootstrap` (any env) | Org: `organizationAdmin`, `folderAdmin`, `projectCreator`, `orgpolicy.policyAdmin`, `logging.configWriter`, `essentialcontacts.admin`, `browser`, `viewer`, `iam.securityReviewer`. Billing: `billing.user`, `billing.viewer`. On `pr-iac-core`: KMS admin, SA admin, WIF pool admin, Pub/Sub admin, BigQuery admin, storage admin. On `pr-logging`: logging admin, storage admin. On `pr-billing`: BigQuery admin. State `bootstrap` bucket: `objectAdmin`. |
-| `sa-tf-infra-prod` | `gcp-infrastructure-lz` (env=production) | On hub + shared-prod: `compute.networkAdmin`, `compute.securityAdmin`, `dns.admin`, `networkconnectivity.admin`, `servicenetworking.networksAdmin`, `compute.xpnAdmin`. State `lz` bucket: `objectAdmin`. |
-| `sa-tf-infra-nonprod` | `gcp-infrastructure-lz` (env=nonprod) | Same roles as infra-prod on hub + shared-nonprod. State `lz` bucket: `objectAdmin`. |
-| `sa-tf-workload-prod` | `gcp-workload` (env=production) | On prod workload projects: `editor`, `projectIamAdmin`, `secretmanager.admin`, `serviceAccountAdmin`. Each prod workload state bucket: `objectAdmin`. |
-| `sa-tf-workload-nonprod` | `gcp-workload` (env=nonprod) | Same roles on nonprod workload projects and state buckets. |
+| `platform-tf-admin-sa` | `gcp-foundation-bootstrap` (any env) | Org: `organizationAdmin`, `folderAdmin`, `projectCreator`, `orgpolicy.policyAdmin`, `logging.configWriter`, `essentialcontacts.admin`, `browser`, `viewer`, `iam.securityReviewer`. Billing: `billing.user`, `billing.viewer`. On `pr-iac-core`: KMS admin, SA admin, WIF pool admin, Pub/Sub admin, BigQuery admin, storage admin. On `pr-logging`: logging admin, storage admin. On `pr-billing`: BigQuery admin. State `bootstrap` bucket: `objectAdmin`. |
+| `network-tf-infra-sa-prod` | `gcp-infrastructure-lz` (env=production) | On hub + shared-prod: `compute.networkAdmin`, `compute.securityAdmin`, `dns.admin`, `networkconnectivity.admin`, `servicenetworking.networksAdmin`, `compute.xpnAdmin`. State `lz` bucket: `objectAdmin`. |
+| `network-tf-infra-sa-nonprod` | `gcp-infrastructure-lz` (env=nonprod) | Same roles as infra-prod on hub + shared-nonprod. State `lz` bucket: `objectAdmin`. |
+| `workload-tf-prod-sa` | `gcp-workload` (env=production) | On prod workload projects: `editor`, `projectIamAdmin`, `secretmanager.admin`, `serviceAccountAdmin`. Each prod workload state bucket: `objectAdmin`. |
+| `workload-tf-nonprod-sa` | `gcp-workload` (env=nonprod) | Same roles on nonprod workload projects and state buckets. |
 
 `dev-terraform-execute` holding `roles/resourcemanager.organizationAdmin` is exception EX-1 in [controls.md](controls.md). The apply workflow still waits for the GitHub `production` environment. The account itself can write from a pull request of a bound repository.
 
@@ -139,8 +139,8 @@ See ADR 0007 for the full rationale. All five SAs live in `pr-iac-core`. Permiss
 
 | Account | Project | Roles |
 |---|---|---|
-| `sa-billing-reader@demo-pr-billing.iam.gserviceaccount.com` | billing export bucket | `storage.objectViewer` |
-| `sa-logging-reader@demo-pr-logging.iam.gserviceaccount.com` | `demo-pr-logging` | `logging.viewer`, `logging.privateLogViewer` |
+| `billing-reader-sa@demo-pr-billing.iam.gserviceaccount.com` | billing export bucket | `storage.objectViewer` |
+| `logging-reader-sa@demo-pr-logging.iam.gserviceaccount.com` | `demo-pr-logging` | `logging.viewer`, `logging.privateLogViewer` |
 
 ### Workload access
 
@@ -207,7 +207,7 @@ Projects use `deletion_policy = PREVENT`. Folders use `deletion_protection = tru
 | Bucket | `demo-pr-tfstate-lz` (same controls, for `gcp-infrastructure-lz`) |
 | Bucket | `demo-pr-access-logs` in `demo-pr-logging` |
 | Bucket | `demo-pr-billing-exports` in `demo-pr-billing` |
-| Service accounts | First apply: `sa-tf-bootstrap-plan`, `sa-tf-bootstrap-apply`, `sa-tf-lz-plan`, `sa-tf-lz-apply`, `sa-billing-reader`, `sa-logging-reader`. Next apply of stage 0 replaces the four `sa-tf-*` accounts with `dev-terraform-execute` and keeps the two readers |
+| Service accounts | First apply: `platform-tf-admin-sa-plan`, `platform-tf-admin-sa-apply`, `sa-tf-lz-plan`, `sa-tf-lz-apply`, `billing-reader-sa`, `logging-reader-sa`. Next apply of stage 0 replaces the four `sa-tf-*` accounts with `dev-terraform-execute` and keeps the two readers |
 
 Default compute service accounts on these projects are deleted. APIs enabled on every core project include Cloud Billing, Resource Manager, IAM, IAM Credentials, Service Usage, STS, Logging, Monitoring, BigQuery, Secret Manager, and Cloud Storage. `demo-pr-iac-core` also has Cloud KMS. `demo-pr-iac-core` and `demo-pr-logging` also have Organization Policy.
 

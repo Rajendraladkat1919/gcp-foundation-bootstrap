@@ -13,5 +13,10 @@ cost_center: platform
 # deployer_roles: []
 # Human access. Principals must be groups, never individual users.
 iam_groups:
-  "group:business-unit-1@example.com":
+  # Commercial BU team — view access to their production project
+  "group:business-unit-commercial@platform-engineering.site":
     - roles/viewer
+  # Platform Engineers — broader visibility across all workload projects
+  "group:arp-platform-engineers@platform-engineering.site":
+    - roles/viewer
+  # Note: grp-developer NOT granted on prod — developers work in nonprod only

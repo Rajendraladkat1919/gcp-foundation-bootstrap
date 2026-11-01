@@ -1,11 +1,10 @@
 output "sa_emails" {
   description = "Terraform executor SA emails keyed by role. Stages 2 and 4 read this to avoid recomputing SA emails from the naming module independently."
   value = {
-    bootstrap        = "sa-tf-bootstrap@${module.naming.core_project_ids["iac_core"]}.iam.gserviceaccount.com"
-    infra_prod       = "sa-tf-infra-prod@${module.naming.core_project_ids["iac_core"]}.iam.gserviceaccount.com"
-    infra_nonprod    = "sa-tf-infra-nonprod@${module.naming.core_project_ids["iac_core"]}.iam.gserviceaccount.com"
-    workload_prod    = "sa-tf-workload-prod@${module.naming.core_project_ids["iac_core"]}.iam.gserviceaccount.com"
-    workload_nonprod = "sa-tf-workload-nonprod@${module.naming.core_project_ids["iac_core"]}.iam.gserviceaccount.com"
+    bootstrap        = "platform-tf-admin-sa@${"${var.prefix}-pr-iac-core"}.iam.gserviceaccount.com"
+    infra = "network-tf-infra-sa@${"${var.prefix}-pr-iac-core"}.iam.gserviceaccount.com"
+    # Workload SAs are per-project (one SA per YAML file, name = workload-{short_name}-{env}-sa).
+    # Stage 4 computes them directly from YAML data — no entry here required.
   }
 }
 
@@ -22,10 +21,11 @@ output "network_log_bucket_id" {
 output "folder_ids" {
   description = <<-EOT
     Folder IDs keyed by logical path. Useful keys for downstream stages:
-      infrastructure                  — top-level Infrastructure folder
-      infrastructure/network          — Network folder; hub + shared-prod + shared-nonprod projects live here
-      workloads                       — top-level Workloads folder
-      workloads/<bu>/<env>            — per business-unit / per environment folder (used by Stage 4)
+      infrastructure         — top-level Infrastructure folder
+      infrastructure/network — Network folder; hub + shared-prod + shared-nonprod live here
+      workloads              — top-level Workloads folder
+      workloads/prod         — all production workload projects (used by Stage 4)
+      workloads/nonprod      — all non-production workload projects (used by Stage 4)
   EOT
   value = merge(
     {
@@ -33,8 +33,7 @@ output "folder_ids" {
       "workloads"      = module.folder_workloads.id
     },
     { for k, v in module.folder_infrastructure_children : "infrastructure/${k}" => v.id },
-    { for k, v in module.folder_business_units : "workloads/${k}" => v.id },
-    { for k, v in module.folder_business_unit_environments : "workloads/${k}" => v.id },
+    { for k, v in module.folder_workload_environments : "workloads/${k}" => v.id },
   )
 }
 

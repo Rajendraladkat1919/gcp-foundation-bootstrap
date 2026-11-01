@@ -8,7 +8,7 @@ download-external-modules: false
 skip-path:
   - ".terraform/"
 # Every skip needs a written justification, see docs/controls.md ("Exceptions").
-skip-check:
-  # EX-5 in docs/controls.md: modules come from one internal repository, pinned by
-  # release tag. Protect the v* tags in gcp-terraform-module with a tag ruleset.
-  - CKV_TF_1
+# CKV_TF_1 (require SHA pinning) is no longer skipped — all modules are now pinned to
+# SHA 5b9de0cf7bb5163ef8d0fa4973f31dd36b6de528 (CFF v59.2.0) sourced directly from
+# github.com/GoogleCloudPlatform/cloud-foundation-fabric.
+skip-check: []

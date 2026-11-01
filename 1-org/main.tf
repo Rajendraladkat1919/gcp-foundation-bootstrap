@@ -1,20 +1,14 @@
-module "naming" {
-  source = "../../gcp-terraform-module/modules/naming"
-  prefix = var.prefix
-}
-
 locals {
   # ── Convenience references ───────────────────────────────────────────────────
   org_id_numeric         = trimprefix(var.organization_id, "organizations/")
-  iac_core_project       = module.naming.core_project_ids["iac_core"]
-  # sa-tf-bootstrap owns all bootstrap stages; explicit email avoids naming-module coupling.
-  terraform_executor  = "serviceAccount:sa-tf-bootstrap@${local.iac_core_project}.iam.gserviceaccount.com"
-  # Infra SAs need compute.xpnAdmin on workload env folders to attach service projects to Shared VPC.
-  infra_prod_sa       = "serviceAccount:sa-tf-infra-prod@${local.iac_core_project}.iam.gserviceaccount.com"
-  infra_nonprod_sa    = "serviceAccount:sa-tf-infra-nonprod@${local.iac_core_project}.iam.gserviceaccount.com"
-  logging_project        = module.naming.core_project_ids["logging"]
+  iac_core_project       = "${var.prefix}-pr-iac-core"
+  # platform-tf-admin-sa owns all bootstrap stages; explicit email avoids naming-module coupling.
+  terraform_executor = "serviceAccount:platform-tf-admin-sa@${local.iac_core_project}.iam.gserviceaccount.com"
+  # network-tf-infra-sa needs compute.xpnAdmin on workload env folders to attach service projects to Shared VPC.
+  infra_sa           = "serviceAccount:network-tf-infra-sa@${local.iac_core_project}.iam.gserviceaccount.com"
+  logging_project        = "${var.prefix}-pr-logging"
   xsiam_topic_resource   = "pubsub.googleapis.com/projects/${local.iac_core_project}/topics/${var.prefix}-pr-xsiam"
-  prisma_cloud_sa_member = "serviceAccount:sa-prisma-cloud@${local.iac_core_project}.iam.gserviceaccount.com"
+  prisma_cloud_sa_member = "serviceAccount:prisma-cloud-sa@${local.iac_core_project}.iam.gserviceaccount.com"
 
   # ── Folder IAM ───────────────────────────────────────────────────────────────
   # Both top-level folders (Infrastructure, Workloads) need the same executor bindings.
@@ -65,13 +59,11 @@ locals {
     network = "Network"
   }
 
-  business_unit_environments = {
-    for pair in setproduct(keys(var.business_units), keys(module.naming.environments)) :
-    "${pair[0]}/${pair[1]}" => {
-      business_unit = pair[0]
-      environment   = pair[1]
-      folder_name   = module.naming.environments[pair[1]].folder_name
-    }
+  # Prod and NonProd folders sit directly under Workloads. No BU layer.
+  # BU isolation is handled at project level via iam_groups in the YAML files.
+  workload_environments = {
+    prod    = "Prod"
+    nonprod = "NonProd"
   }
 
   # ── Okta group IAM ───────────────────────────────────────────────────────────
@@ -102,9 +94,9 @@ locals {
 # ──────────────────────────────────────────────────────── central audit logs
 
 module "audit_log_bucket" {
-  source = "../../gcp-terraform-module/modules/logging-bucket"
+  source = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/logging-bucket?ref=5b9de0cf7bb5163ef8d0fa4973f31dd36b6de528"
   # Provider stores this as projects/<id>. The short id forces a new bucket on rename.
-  parent      = "projects/${module.naming.core_project_ids["logging"]}"
+  parent      = "projects/${"${var.prefix}-pr-logging"}"
   parent_type = "project"
   name        = "org-audit"
   location    = var.region
@@ -115,8 +107,8 @@ module "audit_log_bucket" {
 
 # Flow logs use a separate bucket — they are high-volume with a shorter retention.
 module "network_log_bucket" {
-  source      = "../../gcp-terraform-module/modules/logging-bucket"
-  parent      = "projects/${module.naming.core_project_ids["logging"]}"
+  source      = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/logging-bucket?ref=5b9de0cf7bb5163ef8d0fa4973f31dd36b6de528"
+  parent      = "projects/${"${var.prefix}-pr-logging"}"
   parent_type = "project"
   name        = "org-network"
   location    = var.region
@@ -127,7 +119,7 @@ module "network_log_bucket" {
 # ──────────────────────────────────────────────────────────────── organization
 
 module "organization" {
-  source          = "../../gcp-terraform-module/modules/organization"
+  source          = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/organization?ref=5b9de0cf7bb5163ef8d0fa4973f31dd36b6de528"
   organization_id = var.organization_id
   factories_config = {
     org_policies = "${path.module}/policies/org-policies"
@@ -175,8 +167,9 @@ module "organization" {
   }
 
   # Additive only: this stage must never remove an IAM member it did not add.
+  # All groups are optional — bindings are skipped when the email is empty string.
   iam_by_principals_additive = merge(
-    {
+    var.groups.platform_engineers != "" ? {
       "group:${var.groups.platform_engineers}" = [
         "roles/iam.securityReviewer",
         "roles/logging.viewer",
@@ -184,7 +177,7 @@ module "organization" {
         "roles/resourcemanager.folderViewer",
         "roles/resourcemanager.organizationViewer",
       ]
-    },
+    } : {},
     local.optional_group_bindings,
   )
 }
@@ -192,7 +185,7 @@ module "organization" {
 # ──────────────────────────────────────────────────────────────────── folders
 
 module "folder_infrastructure" {
-  source                = "../../gcp-terraform-module/modules/folder"
+  source                = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/folder?ref=5b9de0cf7bb5163ef8d0fa4973f31dd36b6de528"
   parent                = var.organization_id
   name                  = "Infrastructure"
   deletion_protection   = !var.allow_destroy
@@ -200,7 +193,7 @@ module "folder_infrastructure" {
 }
 
 module "folder_workloads" {
-  source                = "../../gcp-terraform-module/modules/folder"
+  source                = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/folder?ref=5b9de0cf7bb5163ef8d0fa4973f31dd36b6de528"
   parent                = var.organization_id
   name                  = "Workloads"
   deletion_protection   = !var.allow_destroy
@@ -208,7 +201,7 @@ module "folder_workloads" {
 }
 
 module "folder_infrastructure_children" {
-  source              = "../../gcp-terraform-module/modules/folder"
+  source              = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/folder?ref=5b9de0cf7bb5163ef8d0fa4973f31dd36b6de528"
   for_each            = local.infrastructure_children
   parent              = module.folder_infrastructure.id
   name                = each.value
@@ -217,31 +210,17 @@ module "folder_infrastructure_children" {
   iam_bindings_additive = each.key == "network" ? local.network_folder_iam : {}
 }
 
-module "folder_business_units" {
-  source              = "../../gcp-terraform-module/modules/folder"
-  for_each            = var.business_units
+module "folder_workload_environments" {
+  source              = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/folder?ref=5b9de0cf7bb5163ef8d0fa4973f31dd36b6de528"
+  for_each            = local.workload_environments
   parent              = module.folder_workloads.id
-  name                = each.value.display_name
+  name                = each.value
   deletion_protection = !var.allow_destroy
-  iam_bindings_additive = {
-    bu_group_folder_viewer = {
-      member = "group:${each.value.group}"
-      role   = "roles/resourcemanager.folderViewer"
-    }
-  }
-}
-
-module "folder_business_unit_environments" {
-  source              = "../../gcp-terraform-module/modules/folder"
-  for_each            = local.business_unit_environments
-  parent              = module.folder_business_units[each.value.business_unit].id
-  name                = each.value.folder_name
-  deletion_protection = !var.allow_destroy
-  # Grant the environment-matched infra SA compute.xpnAdmin so it can attach workload projects
-  # as Shared VPC service projects (required on both the host project and the service project).
+  # network-tf-infra-sa needs compute.xpnAdmin here so it can attach any workload project as a
+  # Shared VPC service project (required on the service project folder, not only the host).
   iam_bindings_additive = {
     infra_sa_xpn_admin = {
-      member = each.value.environment == "prod" ? local.infra_prod_sa : local.infra_nonprod_sa
+      member = local.infra_sa
       role   = "roles/compute.xpnAdmin"
     }
   }
@@ -277,6 +256,7 @@ resource "google_essential_contacts_contact" "security" {
 }
 
 resource "google_essential_contacts_contact" "platform" {
+  count                               = var.groups.platform_engineers != "" ? 1 : 0
   parent                              = var.organization_id
   email                               = var.groups.platform_engineers
   language_tag                        = "en-US"

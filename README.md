@@ -11,7 +11,7 @@ It builds the part of the Google Cloud foundation that everything else stands on
 | [`2-network-projects`](2-network-projects/) | Three shell projects under `Infrastructure/Network`: `net-core-hub`, `net-shared-prod`, `net-shared-nonprod`. Grants infra SAs on each project. | Applied right after folders. VPCs, firewall, NAT and NCC stay in `gcp-infrastructure-lz`. |
 | [`4-workload-projects`](4-workload-projects/) | One project per YAML file under `data/projects/`, with per-environment workload SA granted, a CMEK key and a state bucket | The only stage that changes often. A new project is one reviewed YAML file. |
 
-Module code comes from `gcp-terraform-module` (Cloud Foundation Fabric **v59.1.0**), pinned by tag.
+Module code sourced directly from [Cloud Foundation Fabric](https://github.com/GoogleCloudPlatform/cloud-foundation-fabric) **v59.2.0**, pinned to SHA `5b9de0cf`.
 
 ## Identity architecture
 
@@ -55,10 +55,10 @@ See [docs/architecture.md](docs/architecture.md) for diagrams and [docs/controls
 ## Getting started
 
 1. Read [docs/runbook-bootstrap.md](docs/runbook-bootstrap.md). The first apply is manual and needs elevated human access once.
-2. `make set-org ORG=<github-org>` replaces the `ORG` placeholder in module sources and CODEOWNERS.
+2. `make set-org ORG=<github-org>` replaces the `ORG` placeholder in CODEOWNERS.
 3. Copy each stage's `terraform.tfvars.example` to `terraform.tfvars` and fill in real values. Do not commit `terraform.tfvars`.
 4. `make hooks` before your first commit. Commits that fail the hooks are rejected locally, and CI runs the same hooks.
-5. `make validate` checks every stage offline against a sibling checkout of `gcp-terraform-module`.
+5. `terraform validate` in each stage directory validates the configuration (modules are fetched from GitHub on `terraform init`).
 
 ## GitHub configuration (set after Stage 0 is applied)
 
@@ -68,7 +68,6 @@ See [docs/architecture.md](docs/architecture.md) for diagrams and [docs/controls
 | Variable | `TF_SA_BOOTSTRAP` | Output `automation_service_accounts.bootstrap` of Stage 0 — used by this repo's pipeline |
 | Variable | `TF_STATE_BUCKET` | Output `state_buckets.bootstrap` of Stage 0 |
 | Variable (optional) | `RUNNER_LABELS` | JSON list, e.g. `["self-hosted","cicd-runners"]`. Default `["ubuntu-24.04"]` |
-| Secret | `MODULES_READ_TOKEN` | Read-only credential for `gcp-terraform-module` (`contents: read` on that repository only) |
 | Environment | `nonprod` | No approval gate. Used by plan and drift jobs. |
 | Environment | `production` | Required reviewers, deployment from `main` only. `make protect` creates it. |
 

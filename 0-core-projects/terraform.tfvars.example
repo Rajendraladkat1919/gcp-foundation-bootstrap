@@ -6,6 +6,7 @@ organization_id    = "organizations/000000000000"
 billing_account_id = "000000-000000-000000"
 cost_center        = "platform"
 region             = "us-west2"
+state_location     = "US"         # multi-region; must encompass var.region (US covers all us-* regions)
 
 # ── GitHub / WIF identity ──────────────────────────────────────────────────────
 # github_org is the organisation slug in your repo URLs:

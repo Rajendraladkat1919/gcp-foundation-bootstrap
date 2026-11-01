@@ -10,7 +10,7 @@ output "projects" {
       shared-prod    — Shared VPC host for production workloads
       shared-nonprod — Shared VPC host for non-production workloads
     The landing zone (gcp-infrastructure-lz) builds VPCs inside these projects.
-    sa-tf-infra-prod/nonprod are pre-granted on the appropriate projects.
+    network-tf-infra-sa is pre-granted on hub, shared-prod, and shared-nonprod.
   EOT
   value = {
     for k, m in module.project : k => {
@@ -23,10 +23,7 @@ output "projects" {
   }
 }
 
-output "infra_sa_emails" {
-  description = "Infra SA emails pre-granted on network projects. Set these as TF_SA in gcp-infrastructure-lz."
-  value = {
-    prod    = local.infra_prod_email
-    nonprod = local.infra_nonprod_email
-  }
+output "infra_sa_email" {
+  description = "network-tf-infra-sa email pre-granted on all network projects. Set as TF_SA in gcp-infrastructure-lz."
+  value       = local.infra_email
 }

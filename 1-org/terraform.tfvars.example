@@ -19,21 +19,10 @@ groups = {
   break_glass        = ""   # e.g. "break-glass@example.com"
 }
 
-# ── Business units ─────────────────────────────────────────────────────────────
-# Each entry creates a Workloads/<display_name>/{Prod,NonProd} folder triple.
-# Add business-unit-1 once the BU-1 workload YAML files are ready.
-business_units = {
-  business-unit-0 = {
-    display_name = "Business Unit 0"
-    group        = "business-unit-0@example.com"
-  }
-  business-unit-1 = {
-    display_name = "Business Unit 1"
-    group        = "business-unit-1@example.com"
-  }
-}
-
 # ── Optional features ──────────────────────────────────────────────────────────
+# NOTE: business_units is no longer a Stage 1 variable. Workloads are organised
+# into Workloads/Prod and Workloads/NonProd folders. BU identity is a label on
+# each project, set via the business_unit field in 4-workload-projects YAML files.
 # enable_scc                    = false   # true → SCC notification config (activate in Console first)
 # enable_data_access_logs       = true    # false to save log volume costs
 # security_contact_email        = ""      # e.g. "security@example.com"

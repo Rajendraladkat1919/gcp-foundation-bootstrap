@@ -27,12 +27,9 @@ variable "audit_log_retention_days" {
   }
 }
 
-variable "business_units" {
-  description = "Business units under the Workloads folder. The key is a stable slug, display_name is the folder name, group is the Google group that can browse the folder."
-  type = map(object({
-    display_name = string
-    group        = string
-  }))
+variable "directory_customer_id" {
+  description = "Cloud Identity customer ID (format: C0xxxxxxxxx). Found in Google Admin console → Account → Account Settings, or via: gcloud organizations describe ORG_ID --format='value(owner.directoryCustomerId)'. Required to create Cloud Identity groups via Terraform."
+  type        = string
 }
 
 variable "domain" {
@@ -47,16 +44,17 @@ variable "enable_data_access_logs" {
 }
 
 variable "groups" {
-  description = "Google groups provisioned by Okta SCIM into Cloud Identity. All must already exist before apply. Optional fields default to empty string (no binding created)."
+  description = "Okta-provisioned Google groups in Cloud Identity. All fields are optional — leave as empty string to skip the IAM binding. Groups do not need to exist before the first apply; add emails once Okta SCIM has provisioned the groups and re-apply Stage 1."
   type = object({
-    platform_engineers = string
-    # Okta-provisioned groups — add emails in terraform.tfvars once the groups exist in Cloud Identity
+    # All fields are optional so deployment can proceed before any groups are created.
+    platform_engineers = optional(string, "")
     audit_viewers      = optional(string, "")
     billing_viewers    = optional(string, "")
     network_viewers    = optional(string, "")
     security_reviewers = optional(string, "")
     break_glass        = optional(string, "")
   })
+  default = {}
 }
 
 variable "lock_audit_log_bucket" {

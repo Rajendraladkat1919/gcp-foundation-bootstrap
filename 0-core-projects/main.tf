@@ -1,9 +1,18 @@
-module "naming" {
-  source = "../../gcp-terraform-module/modules/naming"
-  prefix = var.prefix
-}
-
 locals {
+  # ── Naming conventions (replaces the external naming module) ──────────────────
+  # Resource names follow the pattern {prefix}-{short-name}. The project module
+  # takes (prefix + name) and creates the full project ID as {prefix}-{name}.
+  naming_core_project_names = {
+    iac_core = "pr-iac-core"
+    billing  = "pr-billing"
+    logging  = "pr-logging"
+  }
+  naming_core_project_ids = {
+    iac_core = "${var.prefix}-pr-iac-core"
+    billing  = "${var.prefix}-pr-billing"
+    logging  = "${var.prefix}-pr-logging"
+  }
+
   # ── API groups ──────────────────────────────────────────────────────────────
   foundation_apis = [
     "cloudbilling.googleapis.com",
@@ -53,20 +62,55 @@ locals {
     "roles/viewer",
   ]
 
-  # State bucket names and their access-log object prefixes.
+  # ── Workload SA discovery ────────────────────────────────────────────────────
+  # Read every YAML in Stage 4 to derive one SA + one WIF binding per workload.
+  # Adding a new YAML automatically creates the SA and the repo/env-scoped WIF binding.
+  workload_yamls = {
+    for f in fileset("${path.module}/../4-workload-projects/data/projects", "*.yaml") :
+    trimsuffix(f, ".yaml") => yamldecode(file("${path.module}/../4-workload-projects/data/projects/${f}"))
+  }
+
+  # Maps YAML environment value → GitHub Actions environment name.
+  github_env_names = {
+    prod    = "production"
+    nonprod = "nonprod"
+    qa      = "qa"
+    dev     = "dev"
+  }
+
+  # SA name formula: workload-{short_name}-{environment}-sa
+  # Stage 4 computes the identical formula from YAML data — no remote state read needed.
+  workload_sa_map = {
+    for k, v in local.workload_yamls : k => {
+      sa_name    = "workload-${v.short_name}-${v.environment}-sa"
+      repository = v.repository
+      github_env = try(local.github_env_names[v.environment], v.environment)
+    }
+  }
+
+  # State buckets — explicit names so every stage can compute the same value from var.prefix
+  # without relying on the naming module (which would couple downstream stages to its internals).
+  #   foundation → bootstrap stages 0-4  (the org skeleton)
+  #   network    → gcp-infrastructure-lz (hub + spoke VPCs)
   state_buckets = {
-    bootstrap = "tfstate-bootstrap"
-    lz        = "tfstate-lz"
+    bootstrap = {
+      bucket_name = "${var.prefix}-terraform-state-foundation"
+      log_prefix  = "terraform-state-foundation"
+    }
+    lz = {
+      bucket_name = "${var.prefix}-terraform-state-network"
+      log_prefix  = "terraform-state-network"
+    }
   }
 }
 
 # ──────────────────────────────────────────────────────────────── core projects
 
 module "core_project" {
-  source   = "../../gcp-terraform-module/modules/project"
+  source   = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/project?ref=5b9de0cf7bb5163ef8d0fa4973f31dd36b6de528"
   for_each = local.core_project_services
 
-  name                    = module.naming.core_project_names[each.key]
+  name                    = local.naming_core_project_names[each.key]
   prefix                  = var.prefix
   parent                  = var.organization_id
   billing_account         = var.billing_account_id
@@ -118,7 +162,7 @@ resource "google_project_service_identity" "gcs" {
 }
 
 module "kms" {
-  source     = "../../gcp-terraform-module/modules/kms"
+  source     = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/kms?ref=5b9de0cf7bb5163ef8d0fa4973f31dd36b6de528"
   project_id = module.core_project["iac_core"].project_id
   keyring    = { location = var.region, name = "tfstate" }
   keys = {
@@ -140,12 +184,12 @@ resource "google_kms_crypto_key_iam_member" "gcs_agent" {
 # ────────────────────────────────────────────────────────────────────── buckets
 
 module "access_logs" {
-  source     = "../../gcp-terraform-module/modules/gcs"
+  source     = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/gcs?ref=5b9de0cf7bb5163ef8d0fa4973f31dd36b6de528"
   depends_on = [google_org_policy_policy.logging_member_domains, google_org_policy_policy.logging_allowed_members]
 
   project_id                  = module.core_project["logging"].project_id
   prefix                      = var.prefix
-  name                        = "pr-access-logs"
+  name                        = "gcs-access-logs"
   location                    = var.region
   labels                      = local.labels
   versioning                  = true
@@ -162,17 +206,17 @@ module "access_logs" {
 }
 
 # bootstrap and lz state buckets share the same config; only name, log prefix, and IAM differ.
-# bootstrap bucket  → sa-tf-bootstrap only (this repo's pipeline)
-# lz bucket         → sa-tf-infra-prod + sa-tf-infra-nonprod (gcp-infrastructure-lz pipeline)
+# bootstrap bucket  → platform-tf-admin-sa only (this repo's pipeline)
+# lz bucket         → network-tf-infra-sa (gcp-infrastructure-lz pipeline, all environments)
 module "state" {
-  source     = "../../gcp-terraform-module/modules/gcs"
+  source     = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/gcs?ref=5b9de0cf7bb5163ef8d0fa4973f31dd36b6de528"
   for_each   = local.state_buckets
   depends_on = [google_kms_crypto_key_iam_member.gcs_agent]
 
   project_id                  = module.core_project["iac_core"].project_id
   prefix                      = var.prefix
-  name                        = module.naming.state_bucket_names[each.key]
-  location                    = var.region
+  name                        = each.value.bucket_name
+  location                    = var.state_location
   labels                      = local.labels
   versioning                  = true
   encryption_key              = module.kms.keys["tfstate"].id
@@ -182,7 +226,7 @@ module "state" {
   soft_delete_retention       = var.allow_destroy ? 0 : 604800 # 7 days
   logging_config = {
     log_bucket        = module.access_logs.name
-    log_object_prefix = each.value
+    log_object_prefix = each.value.log_prefix
   }
   lifecycle_rules = {
     prune_noncurrent = {
@@ -191,23 +235,23 @@ module "state" {
     }
   }
   iam = each.key == "bootstrap" ? {
-    # Only sa-tf-bootstrap writes bootstrap state.
-    # Infra SAs get objectViewer so gcp-infrastructure-lz can read workload project outputs
+    # Only platform-tf-admin-sa writes bootstrap state.
+    # network-tf-infra-sa gets objectViewer so gcp-infrastructure-lz can read workload project outputs
     # published at bootstrap/3-workload-projects (e.g. project IDs for Shared VPC attachment).
     "roles/storage.objectAdmin"  = [module.sa_tf_bootstrap.iam_email]
-    "roles/storage.objectViewer" = [module.sa_tf_infra_prod.iam_email, module.sa_tf_infra_nonprod.iam_email]
+    "roles/storage.objectViewer" = [module.sa_tf_infra.iam_email]
   } : {
-    # Infra SAs own the lz bucket — they read and write their own state.
-    "roles/storage.objectAdmin" = [module.sa_tf_infra_prod.iam_email, module.sa_tf_infra_nonprod.iam_email]
+    # network-tf-infra-sa owns the lz bucket — reads and writes its own state.
+    "roles/storage.objectAdmin" = [module.sa_tf_infra.iam_email]
   }
 }
 
 module "billing_exports" {
-  source = "../../gcp-terraform-module/modules/gcs"
+  source = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/gcs?ref=5b9de0cf7bb5163ef8d0fa4973f31dd36b6de528"
 
   project_id                  = module.core_project["billing"].project_id
   prefix                      = var.prefix
-  name                        = "pr-billing-exports"
+  name                        = "billing-exports"
   location                    = var.region
   labels                      = local.labels
   versioning                  = true
@@ -225,23 +269,22 @@ module "billing_exports" {
 
 # ───────────────────────────────────────────────────────────── service accounts
 #
-# Five scoped Terraform executor SAs — all live in pr-iac-core.
-# WIF bindings (below) enforce which GitHub repo + environment may impersonate each SA.
+# Terraform executor SAs — all live in pr-iac-core.
+# WIF bindings enforce which GitHub repo + environment may impersonate each SA.
 #
-#   sa-tf-bootstrap     → gcp-foundation-bootstrap  (this repo, any env)
-#   sa-tf-infra-prod    → gcp-infrastructure-lz     (environment=production only)
-#   sa-tf-infra-nonprod → gcp-infrastructure-lz     (environment=nonprod only)
-#   sa-tf-workload-prod    → gcp-workload            (environment=production only)
-#   sa-tf-workload-nonprod → gcp-workload            (environment=nonprod only)
+#   platform-tf-admin-sa       → gcp-foundation-bootstrap (any env)
+#   network-tf-infra-sa        → gcp-infrastructure-lz   (any env — hub is shared)
+#   workload-{name}-{env}-sa   → one SA per YAML file, scoped to that repo + environment
 
 module "sa_tf_bootstrap" {
-  source       = "../../gcp-terraform-module/modules/iam-service-account"
+  source       = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/iam-service-account?ref=5b9de0cf7bb5163ef8d0fa4973f31dd36b6de528"
   project_id   = module.core_project["iac_core"].project_id
-  name         = "sa-tf-bootstrap"
+  name         = "platform-tf-admin-sa"
   display_name = "Terraform bootstrap executor"
   description  = "Runs Terraform for all gcp-foundation-bootstrap stages. Org-admin scope."
   iam_organization_roles = {
     (local.organization_id_numeric) = concat(local.org_read_roles, [
+      "roles/cloudidentity.groupAdmin",   # create and manage Cloud Identity groups in Stage 1
       "roles/essentialcontacts.admin",
       "roles/logging.configWriter",
       "roles/orgpolicy.policyAdmin",
@@ -274,56 +317,48 @@ module "sa_tf_bootstrap" {
   }
 }
 
-# Infra SAs: created here with no project roles. Roles on network projects are
-# granted in Stage 2 once those projects exist.
-module "sa_tf_infra_prod" {
-  source       = "../../gcp-terraform-module/modules/iam-service-account"
+# Infra SA: created here with no project roles. Roles on network projects are
+# granted in Stage 2 once those projects exist. Single SA covers both prod and nonprod
+# because the hub project is shared between environments.
+module "sa_tf_infra" {
+  source       = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/iam-service-account?ref=5b9de0cf7bb5163ef8d0fa4973f31dd36b6de528"
   project_id   = module.core_project["iac_core"].project_id
-  name         = "sa-tf-infra-prod"
-  display_name = "Terraform infra executor — prod"
-  description  = "Runs gcp-infrastructure-lz Terraform for production. Scoped to hub + shared-prod projects."
+  name         = "network-tf-infra-sa"
+  display_name = "Terraform infra executor"
+  description  = "Runs gcp-infrastructure-lz Terraform for all network projects (hub, shared-prod, shared-nonprod)."
 }
 
-module "sa_tf_infra_nonprod" {
-  source       = "../../gcp-terraform-module/modules/iam-service-account"
+# Workload SAs: one per YAML file in Stage 4. No project roles at creation time —
+# Stage 4 grants each SA on its own project once that project exists.
+module "sa_workload" {
+  source       = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/iam-service-account?ref=5b9de0cf7bb5163ef8d0fa4973f31dd36b6de528"
+  for_each     = local.workload_sa_map
   project_id   = module.core_project["iac_core"].project_id
-  name         = "sa-tf-infra-nonprod"
-  display_name = "Terraform infra executor — nonprod"
-  description  = "Runs gcp-infrastructure-lz Terraform for non-production. Scoped to hub + shared-nonprod projects."
+  name         = each.value.sa_name
+  display_name = "Workload executor — ${each.key}"
+  description  = "Runs ${each.value.repository} Terraform. Scoped to ${each.key} project and '${each.value.github_env}' environment only."
 }
 
-# Workload SAs: created here with no project roles. Roles on workload projects are
-# granted in Stage 4 once those projects exist.
-module "sa_tf_workload_prod" {
-  source       = "../../gcp-terraform-module/modules/iam-service-account"
-  project_id   = module.core_project["iac_core"].project_id
-  name         = "sa-tf-workload-prod"
-  display_name = "Terraform workload executor — prod"
-  description  = "Runs gcp-workload Terraform for production workload projects."
+# ──────────────────────── WIF pool — direct provider resources ───────────────
+# Using direct resources instead of the CFF module because the public CFF repo
+# does not include an iam-workload-identity-pool module. Direct resources also
+# give native support for attribute_mapping with no uncertainty.
+
+resource "google_iam_workload_identity_pool" "github" {
+  project                   = module.core_project["iac_core"].project_id
+  workload_identity_pool_id = "github"
+  display_name              = "GitHub Actions OIDC"
+  description               = "WIF pool — single pool for all GitHub Actions pipelines"
 }
 
-module "sa_tf_workload_nonprod" {
-  source       = "../../gcp-terraform-module/modules/iam-service-account"
-  project_id   = module.core_project["iac_core"].project_id
-  name         = "sa-tf-workload-nonprod"
-  display_name = "Terraform workload executor — nonprod"
-  description  = "Runs gcp-workload Terraform for non-production workload projects."
-}
+resource "google_iam_workload_identity_pool_provider" "github_actions" {
+  project                            = module.core_project["iac_core"].project_id
+  workload_identity_pool_id          = google_iam_workload_identity_pool.github.workload_identity_pool_id
+  workload_identity_pool_provider_id = "github-actions"
+  display_name                       = "GitHub Actions"
 
-# ─────────────────────────── WIF pool (moved from deleted Stage 3) ───────────
-
-module "github_wif" {
-  source      = "../../gcp-terraform-module/modules/iam-workload-identity-pool"
-  project_id  = module.core_project["iac_core"].project_id
-  pool_id     = "github"
-  provider_id = "github-actions"
-  display_name = "GitHub Actions OIDC"
-
-  # Map the claims we need for per-SA IAM conditions.
-  # VERIFY: confirm the CFF iam-workload-identity-pool module accepts attribute_mapping.
-  # If it does not, replace this module with direct google_iam_workload_identity_pool +
-  # google_iam_workload_identity_pool_provider resources where attribute_mapping is native.
-  # attribute.environment MUST be mapped — all infra and workload SA conditions depend on it.
+  # Map JWT claims → GCP attributes. attribute.environment MUST be mapped —
+  # all infra and workload SA IAM conditions depend on it.
   attribute_mapping = {
     "google.subject"        = "assertion.sub"
     "attribute.repository"  = "assertion.repository"
@@ -334,6 +369,10 @@ module "github_wif" {
 
   # Pool-level gate: reject any token not from our GitHub org.
   attribute_condition = "assertion.repository_owner == '${var.github_org}'"
+
+  oidc {
+    issuer_uri = "https://token.actions.githubusercontent.com"
+  }
 }
 
 # ─────────────────────────── per-SA WIF impersonation bindings ───────────────
@@ -346,79 +385,49 @@ resource "google_service_account_iam_binding" "wif_bootstrap" {
   service_account_id = module.sa_tf_bootstrap.id
   role               = "roles/iam.workloadIdentityUser"
   members = [
-    "principalSet://iam.googleapis.com/${module.github_wif.pool_name}/attribute.repository/${var.github_org}/${var.bootstrap_repository}",
+    "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${var.github_org}/${var.bootstrap_repository}",
   ]
 }
 
-# Infra prod SA: only gcp-infrastructure-lz jobs that declare environment=production.
-resource "google_service_account_iam_binding" "wif_infra_prod" {
-  service_account_id = module.sa_tf_infra_prod.id
+# Infra SA: any job in gcp-infrastructure-lz may impersonate (plan + apply, all envs).
+# Hub is shared between prod and nonprod — environment segregation at SA level adds
+# complexity without meaningful security gain for a shared network plane.
+resource "google_service_account_iam_binding" "wif_infra" {
+  service_account_id = module.sa_tf_infra.id
   role               = "roles/iam.workloadIdentityUser"
   members = [
-    "principalSet://iam.googleapis.com/${module.github_wif.pool_name}/attribute.repository/${var.github_org}/${var.infra_lz_repository}",
+    "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${var.github_org}/${var.infra_lz_repository}",
   ]
-  condition {
-    title       = "production-env-only"
-    description = "Allows impersonation only from the GitHub 'production' Environment."
-    expression  = "attribute.environment == \"production\""
-  }
 }
 
-# Infra nonprod SA: only gcp-infrastructure-lz jobs that declare environment=nonprod.
-# PR plan jobs must declare environment: nonprod in their workflow to get this token.
-resource "google_service_account_iam_binding" "wif_infra_nonprod" {
-  service_account_id = module.sa_tf_infra_nonprod.id
+# Workload SAs: one binding per YAML file. Each SA is bound to exactly one repo
+# and one GitHub Environment — no cross-repo or cross-environment impersonation.
+resource "google_service_account_iam_binding" "wif_workload" {
+  for_each           = local.workload_sa_map
+  service_account_id = module.sa_workload[each.key].id
   role               = "roles/iam.workloadIdentityUser"
   members = [
-    "principalSet://iam.googleapis.com/${module.github_wif.pool_name}/attribute.repository/${var.github_org}/${var.infra_lz_repository}",
+    "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${var.github_org}/${each.value.repository}",
   ]
   condition {
-    title       = "nonprod-env-only"
-    description = "Allows impersonation only from the GitHub 'nonprod' Environment."
-    expression  = "attribute.environment == \"nonprod\""
-  }
-}
-
-# Workload prod SA: only gcp-workload jobs that declare environment=production.
-resource "google_service_account_iam_binding" "wif_workload_prod" {
-  service_account_id = module.sa_tf_workload_prod.id
-  role               = "roles/iam.workloadIdentityUser"
-  members = [
-    "principalSet://iam.googleapis.com/${module.github_wif.pool_name}/attribute.repository/${var.github_org}/${var.workload_repository}",
-  ]
-  condition {
-    title       = "production-env-only"
-    description = "Allows impersonation only from the GitHub 'production' Environment."
-    expression  = "attribute.environment == \"production\""
-  }
-}
-
-# Workload nonprod SA: only gcp-workload jobs that declare environment=nonprod.
-resource "google_service_account_iam_binding" "wif_workload_nonprod" {
-  service_account_id = module.sa_tf_workload_nonprod.id
-  role               = "roles/iam.workloadIdentityUser"
-  members = [
-    "principalSet://iam.googleapis.com/${module.github_wif.pool_name}/attribute.repository/${var.github_org}/${var.workload_repository}",
-  ]
-  condition {
-    title       = "nonprod-env-only"
-    description = "Allows impersonation only from the GitHub 'nonprod' Environment."
-    expression  = "attribute.environment == \"nonprod\""
+    title       = "${each.key}-env-gate"
+    description = "Only the '${each.value.github_env}' GitHub Environment of ${each.value.repository} may impersonate this SA."
+    expression  = "attribute.environment == \"${each.value.github_env}\""
   }
 }
 
 module "sa_billing_reader" {
-  source       = "../../gcp-terraform-module/modules/iam-service-account"
+  source       = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/iam-service-account?ref=5b9de0cf7bb5163ef8d0fa4973f31dd36b6de528"
   project_id   = module.core_project["billing"].project_id
-  name         = "sa-billing-reader"
+  name         = "billing-reader-sa"
   display_name = "Billing export reader"
   description  = "Reads billing exports for reporting. No write access."
 }
 
 module "sa_logging_reader" {
-  source       = "../../gcp-terraform-module/modules/iam-service-account"
+  source       = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/iam-service-account?ref=5b9de0cf7bb5163ef8d0fa4973f31dd36b6de528"
   project_id   = module.core_project["logging"].project_id
-  name         = "sa-logging-reader"
+  name         = "logging-reader-sa"
   display_name = "Central log reader"
   description  = "Reads the central audit log bucket for security team tooling. No write access."
   iam_project_roles = {
@@ -431,9 +440,9 @@ module "sa_logging_reader" {
 
 module "sa_prisma_cloud" {
   count        = var.enable_prisma_cloud ? 1 : 0
-  source       = "../../gcp-terraform-module/modules/iam-service-account"
+  source       = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/iam-service-account?ref=5b9de0cf7bb5163ef8d0fa4973f31dd36b6de528"
   project_id   = module.core_project["iac_core"].project_id
-  name         = "sa-prisma-cloud"
+  name         = "prisma-cloud-sa"
   display_name = "Prisma Cloud CSPM connector"
   description  = "Read-only org-wide access for Prisma Cloud. Register this SA email under Prisma Cloud → Settings → Cloud Accounts."
   iam_organization_roles = {

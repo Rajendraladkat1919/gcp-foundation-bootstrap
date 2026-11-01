@@ -1,12 +1,7 @@
-module "naming" {
-  source = "../../gcp-terraform-module/modules/naming"
-  prefix = var.prefix
-}
-
 data "terraform_remote_state" "org" {
   backend = "gcs"
   config = {
-    bucket = module.naming.state_bucket_full_names["bootstrap"]
+    bucket = "${var.prefix}-terraform-state-foundation"
     prefix = "bootstrap/1-org"
   }
 }
@@ -28,13 +23,22 @@ locals {
     "sts.googleapis.com",
   ]
 
-  # Roles sa-tf-bootstrap needs to manage project lifecycle (project IAM, service enablement).
+  # ── Naming conventions ────────────────────────────────────────────────────────
+  # Environment code prefix used in project names: pe-pr-prod-bu-0, pe-np-nonprod-bu-0
+  env_codes = {
+    prod    = "pr"
+    nonprod = "np"
+    qa      = "qa"
+    dev     = "dv"
+  }
+
+  # Roles platform-tf-admin-sa needs to manage project lifecycle (project IAM, service enablement).
   bootstrap_project_roles = [
     "roles/resourcemanager.projectIamAdmin",
     "roles/serviceusage.serviceUsageAdmin",
   ]
 
-  # Roles sa-tf-workload-* need to deploy application resources inside workload projects.
+  # Roles workload-tf-*-sa need to deploy application resources inside workload projects.
   workload_deployer_roles = [
     "roles/editor",
     "roles/iam.serviceAccountAdmin",
@@ -47,19 +51,19 @@ locals {
 
   # SA emails are the single source of truth from Stage 1 — no local recomputation.
   bootstrap_sa        = "serviceAccount:${data.terraform_remote_state.org.outputs.sa_emails.bootstrap}"
-  workload_prod_sa    = "serviceAccount:${data.terraform_remote_state.org.outputs.sa_emails.workload_prod}"
-  workload_nonprod_sa = "serviceAccount:${data.terraform_remote_state.org.outputs.sa_emails.workload_nonprod}"
+  # workload_sa is computed per project from YAML — formula: workload-{short_name}-{environment}-sa
+  iac_core_project    = "${var.prefix}-pr-iac-core"
 }
 
 # ─────────────────────────────────────────────── workload project creation
 
 module "project" {
-  source   = "../../gcp-terraform-module/modules/project"
+  source   = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/project?ref=5b9de0cf7bb5163ef8d0fa4973f31dd36b6de528"
   for_each = local.projects
 
-  name                    = "${module.naming.environments[each.value.environment].code}-${each.value.environment}-${each.value.short_name}"
+  name                    = "${local.env_codes[each.value.environment]}-${each.value.environment}-${each.value.short_name}"
   prefix                  = var.prefix
-  parent                  = data.terraform_remote_state.org.outputs.folder_ids["workloads/${each.value.business_unit}/${each.value.environment}"]
+  parent                  = data.terraform_remote_state.org.outputs.folder_ids["workloads/${each.value.environment}"]
   billing_account         = var.billing_account_id
   default_service_account = "delete"
   deletion_policy         = var.allow_destroy ? "DELETE" : "PREVENT"
@@ -77,7 +81,7 @@ module "project" {
     # Workload SA: full deployer access, scoped to the matching environment SA.
     { for role in try(each.value.deployer_roles, local.workload_deployer_roles) :
       "workload_${replace(role, "roles/", "")}" => {
-        member = each.value.environment == "prod" ? local.workload_prod_sa : local.workload_nonprod_sa
+        member = "serviceAccount:workload-${each.value.short_name}-${each.value.environment}-sa@${local.iac_core_project}.iam.gserviceaccount.com"
         role   = role
       }
     }
@@ -101,7 +105,7 @@ data "google_storage_project_service_account" "workload" {
 }
 
 module "kms" {
-  source     = "../../gcp-terraform-module/modules/kms"
+  source     = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/kms?ref=5b9de0cf7bb5163ef8d0fa4973f31dd36b6de528"
   for_each   = local.projects
   project_id = module.project[each.key].project_id
   keyring    = { location = var.region, name = "workload" }
@@ -120,11 +124,11 @@ module "kms" {
 }
 
 module "state" {
-  source     = "../../gcp-terraform-module/modules/gcs"
+  source     = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/gcs?ref=5b9de0cf7bb5163ef8d0fa4973f31dd36b6de528"
   for_each   = local.projects
   project_id = module.project[each.key].project_id
   prefix     = module.project[each.key].project_id
-  name       = "tfstate"
+  name       = "terraform-state"
   location   = var.region
   versioning = true
 
@@ -138,7 +142,7 @@ module "state" {
   # Workload SA owns the state; bootstrap SA has no access (not its state bucket).
   iam = {
     "roles/storage.objectAdmin" = [
-      each.value.environment == "prod" ? local.workload_prod_sa : local.workload_nonprod_sa
+      "serviceAccount:workload-${each.value.short_name}-${each.value.environment}-sa@${local.iac_core_project}.iam.gserviceaccount.com"
     ]
   }
 }

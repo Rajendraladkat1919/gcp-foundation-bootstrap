@@ -1,12 +1,7 @@
-module "naming" {
-  source = "../../gcp-terraform-module/modules/naming"
-  prefix = var.prefix
-}
-
 data "terraform_remote_state" "org" {
   backend = "gcs"
   config = {
-    bucket = module.naming.state_bucket_full_names["bootstrap"]
+    bucket = "${var.prefix}-terraform-state-foundation"
     prefix = "bootstrap/1-org"
   }
 }
@@ -22,9 +17,8 @@ locals {
   #
   network_folder = data.terraform_remote_state.org.outputs.folder_ids["infrastructure/network"]
 
-  # SA emails are the single source of truth from Stage 1 — no local recomputation.
-  infra_prod_email    = data.terraform_remote_state.org.outputs.sa_emails.infra_prod
-  infra_nonprod_email = data.terraform_remote_state.org.outputs.sa_emails.infra_nonprod
+  # SA email from Stage 1 — single infra SA covers all three network projects.
+  infra_email = data.terraform_remote_state.org.outputs.sa_emails.infra
 
   base_apis = [
     "cloudbilling.googleapis.com",
@@ -57,26 +51,26 @@ locals {
 
   projects = {
     hub = {
-      name            = module.naming.network_project_names["hub"]
+      name            = "net-core-hub"
       role            = "net-core-hub"
       shared_vpc_host = false
       services        = distinct(concat(local.base_apis, local.hub_extra_apis))
     }
     shared-prod = {
-      name            = module.naming.network_project_names["prod"]
+      name            = "net-shared-prod"
       role            = "shared-vpc-host-prod"
       shared_vpc_host = true
       services        = concat(local.base_apis, local.spoke_extra_apis)
     }
     shared-nonprod = {
-      name            = module.naming.network_project_names["nonprod"]
+      name            = "net-shared-nonprod"
       role            = "shared-vpc-host-nonprod"
       shared_vpc_host = true
       services        = concat(local.base_apis, local.spoke_extra_apis)
     }
   }
 
-  # Roles that sa-tf-infra-* need to manage VPC, NCC, DNS, and firewall.
+  # Roles that network-tf-infra-sa-* need to manage VPC, NCC, DNS, and firewall.
   infra_network_roles = [
     "roles/compute.networkAdmin",
     "roles/compute.securityAdmin",
@@ -87,31 +81,22 @@ locals {
     "roles/serviceusage.serviceUsageConsumer",
   ]
 
-  # Cross-product of (infra SA, project, role) → one google_project_iam_member per entry.
-  # infra-prod SA → hub + shared-prod
-  # infra-nonprod SA → hub + shared-nonprod
-  infra_sa_grants = merge(
-    { for pair in setproduct(["hub", "shared-prod"], local.infra_network_roles) :
-      "prod-${pair[0]}-${replace(pair[1], "roles/", "")}" => {
-        sa      = "serviceAccount:${local.infra_prod_email}"
-        project = module.project[pair[0]].project_id
-        role    = pair[1]
-      }
-    },
-    { for pair in setproduct(["hub", "shared-nonprod"], local.infra_network_roles) :
-      "nonprod-${pair[0]}-${replace(pair[1], "roles/", "")}" => {
-        sa      = "serviceAccount:${local.infra_nonprod_email}"
-        project = module.project[pair[0]].project_id
-        role    = pair[1]
-      }
+  # Cross-product of (project, role) → one google_project_iam_member per entry.
+  # Single network-tf-infra-sa is granted on all three network projects (hub + both spokes).
+  infra_sa_grants = {
+    for pair in setproduct(["hub", "shared-prod", "shared-nonprod"], local.infra_network_roles) :
+    "${pair[0]}-${replace(pair[1], "roles/", "")}" => {
+      sa      = "serviceAccount:${local.infra_email}"
+      project = module.project[pair[0]].project_id
+      role    = pair[1]
     }
-  )
+  }
 }
 
 # ─────────────────────────────────────────────────────────── network projects
 
 module "project" {
-  source   = "../../gcp-terraform-module/modules/project"
+  source   = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/project?ref=5b9de0cf7bb5163ef8d0fa4973f31dd36b6de528"
   for_each = local.projects
 
   name                    = each.value.name
@@ -134,8 +119,7 @@ module "project" {
 
 # ─────────────────────── grant infra SAs on their target projects ─────────────
 #
-# sa-tf-infra-prod    → hub + shared-prod   (cross-project, scoped roles only)
-# sa-tf-infra-nonprod → hub + shared-nonprod
+# network-tf-infra-sa → hub + shared-prod + shared-nonprod (cross-project, scoped network roles only)
 #
 # Hub is shared: both SAs get the same roles there so each can manage its NCC spoke.
 
